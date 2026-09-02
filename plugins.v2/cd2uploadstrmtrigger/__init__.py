@@ -29,9 +29,9 @@ class Cd2UploadStrmTrigger(_PluginBase):
     """监听 CD2 上传完成任务并调用 115 STRM 助手生成精确增量 STRM。"""
 
     plugin_name = "CD2 上传触发 115 STRM"
-    plugin_desc = "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体调用 115 网盘 STRM 助手生成增量 STRM，字幕按限速下载到本地，并可按批次刷新 Emby。"
+    plugin_desc = "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体调用 115 网盘 STRM 助手生成增量 STRM，字幕按限速下载到本地，并可批量刷新 Emby、同步删除。"
     plugin_icon = "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png"
-    plugin_version = "0.4.0"
+    plugin_version = "0.5.0"
     plugin_author = "wubushanyan"
     author_url = "https://github.com/wubushanyan"
     plugin_config_prefix = "cd2uploadstrmtrigger_"
@@ -44,6 +44,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
     FILE_SYSTEM_MESSAGE = int(cd2_pb2.CloudDrivePushMessage.FILE_SYSTEM_CHANGE)
     FILE_CREATE = int(cd2_pb2.FileSystemChange.CREATE)
     FILE_RENAME = int(cd2_pb2.FileSystemChange.RENAME)
+    FILE_DELETE = int(cd2_pb2.FileSystemChange.DELETE)
     RAPID_RESCAN_DELAYS = (0.2, 0.6, 1.2, 2.5)
     PAYLOAD_DEDUP_SECONDS = 60.0
     SUBTITLE_STABILITY_PROBE_INTERVAL = 1.0
@@ -73,6 +74,12 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._processed_keys: set[str] = set()
         self._recent_payloads: Dict[str, float] = {}
         self._subtitle_wake_event = threading.Event()
+        self._emby_refresh_wake_event = threading.Event()
+        self._emby_refresh_lock = threading.RLock()
+        self._emby_refresh_pending = False
+        self._emby_refresh_deadline = 0.0
+        self._emby_refresh_pending_count = 0
+        self._emby_refresh_reasons: set[str] = set()
         self._last_subtitle_request_at = 0.0
         self._stats: Dict[str, Any] = self._new_stats()
 
@@ -98,6 +105,8 @@ class Cd2UploadStrmTrigger(_PluginBase):
             "notify": False,
             "cd2_api_root": "/115",
             "subtitle_stability_delay": 3.0,
+            "emby_refresh_debounce": 5.0,
+            "delete_sync": False,
         }
 
     @staticmethod
@@ -135,6 +144,12 @@ class Cd2UploadStrmTrigger(_PluginBase):
             "last_emby_refresh_at": "",
             "last_emby_refresh_servers": [],
             "last_emby_refresh_error": "",
+            "emby_refresh_pending_count": 0,
+            "delete_sync_count": 0,
+            "delete_sync_missing_count": 0,
+            "last_delete_at": "",
+            "last_delete_path": "",
+            "last_delete_local_paths": [],
             "last_subtitle_at": "",
             "last_subtitle_file": "",
             "last_subtitle_error": "",
@@ -260,6 +275,13 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 0.0,
                 60.0,
             ),
+            "emby_refresh_debounce": cls._float(
+                raw.get("emby_refresh_debounce"),
+                defaults["emby_refresh_debounce"],
+                0.0,
+                120.0,
+            ),
+            "delete_sync": bool(raw.get("delete_sync", defaults["delete_sync"])),
         }
         return normalized
 
@@ -282,6 +304,12 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._rapid_rescan_event.clear()
         self._last_subtitle_request_at = 0.0
         self._subtitle_wake_event.clear()
+        with self._emby_refresh_lock:
+            self._emby_refresh_pending = False
+            self._emby_refresh_deadline = 0.0
+            self._emby_refresh_pending_count = 0
+            self._emby_refresh_reasons.clear()
+        self._emby_refresh_wake_event.clear()
         stored_processed = self.get_data(self.DATA_KEY_PROCESSED) or []
         if isinstance(stored_processed, list):
             self._processed_keys = {self._text(item) for item in stored_processed if self._text(item)}
@@ -429,7 +457,18 @@ class Cd2UploadStrmTrigger(_PluginBase):
             name="Cd2UploadStrmTrigger-Subtitle",
             daemon=True,
         )
-        self._threads = [poll_thread, push_thread, dispatch_thread, subtitle_thread]
+        emby_refresh_thread = threading.Thread(
+            target=self._emby_refresh_loop,
+            name="Cd2UploadStrmTrigger-EmbyRefresh",
+            daemon=True,
+        )
+        self._threads = [
+            poll_thread,
+            push_thread,
+            dispatch_thread,
+            subtitle_thread,
+            emby_refresh_thread,
+        ]
         for thread in self._threads:
             thread.start()
 
@@ -552,8 +591,13 @@ class Cd2UploadStrmTrigger(_PluginBase):
                                 "【CD2 STRM触发器】收到 FILE_SYSTEM_CHANGE，但消息没有变更详情"
                             )
                         else:
-                            self._observe_file_system_change(message.fileSystemChange)
-                        self._request_rapid_rescan()
+                            change = message.fileSystemChange
+                            self._observe_file_system_change(change)
+                            if int(getattr(change, "changeType", -1)) in (
+                                self.FILE_CREATE,
+                                self.FILE_RENAME,
+                            ):
+                                self._request_rapid_rescan()
                         continue
                     has_details = message.HasField("transferTaskStatus")
                     task_count = (
@@ -641,6 +685,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     payload.get("cd2_path") or key,
                     f"（{detail}）" if detail else "",
                 )
+                self._request_emby_refresh("subtitle", 1)
             except Exception as exc:
                 attempts = int(item.get("attempts", 0)) + 1
                 with self._state_lock:
@@ -739,7 +784,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._enqueue_payload(kind, key, payload, persist_key=True, source=source)
 
     def _observe_file_system_change(self, change: Any) -> None:
-        """处理 CD2 文件系统 CREATE/RENAME 事件，捕获已从上传列表消失的文件。"""
+        """处理 CD2 文件系统 CREATE/RENAME/DELETE 事件。"""
         change_type = int(getattr(change, "changeType", -1))
         change_name = self._file_change_type_name(change_type)
         raw_path = self._text(getattr(change, "path", ""))
@@ -772,6 +817,15 @@ class Cd2UploadStrmTrigger(_PluginBase):
         if not self._ready_event.is_set():
             logger.info("【CD2 STRM触发器】监听器尚未完成基线，文件系统变更仅记录不处理")
             return
+        if change_type == self.FILE_DELETE:
+            if not self._config.get("delete_sync"):
+                logger.info(
+                    "【CD2 STRM触发器】删除同步未启用，跳过本地删除：path=%s",
+                    destination,
+                )
+                return
+            self._sync_deleted_path(destination, is_directory, size)
+            return
         if change_type not in (self.FILE_CREATE, self.FILE_RENAME) or is_directory:
             return
         if not destination:
@@ -793,6 +847,167 @@ class Cd2UploadStrmTrigger(_PluginBase):
             persist_key=False,
             source="filesystem",
         )
+
+    def _sync_deleted_path(
+        self, destination: str, is_directory: bool, size: int
+    ) -> None:
+        """将 CD2 删除事件同步到本地字幕、STRM 和空目录。"""
+        if not destination:
+            self._log_ignored(destination, "删除事件没有有效文件路径")
+            return
+
+        canonical_destination = self._canonical_cd2_path(destination)
+        rule = self._find_rule(canonical_destination)
+        if not rule:
+            self._log_ignored(
+                destination,
+                f"删除路径未命中目录规则（规范化路径：{canonical_destination or '/'}）",
+            )
+            return
+
+        rule_prefix = self._canonical_cd2_path(rule["cd2_prefix"])
+        relative = self._relative_path(canonical_destination, rule_prefix)
+        try:
+            local_target = Path(self._local_file_path(rule["local_path"], relative))
+        except Exception as exc:
+            self._log_ignored(destination, f"删除路径映射失败：{exc}")
+            return
+        local_root = Path(self._text(rule["local_path"])).expanduser()
+
+        if is_directory:
+            removed_dirs = self._remove_empty_dirs(local_target, local_root)
+            if removed_dirs:
+                self._record_delete_result(
+                    canonical_destination,
+                    removed_dirs,
+                    kind="directory",
+                )
+                self._request_emby_refresh("delete", len(removed_dirs))
+            else:
+                self._record_delete_missing(canonical_destination)
+                logger.info(
+                    "【CD2 STRM触发器】删除同步：本地目录不存在或非空，未删除：cd2=%s local=%s",
+                    canonical_destination,
+                    local_target,
+                )
+            return
+
+        built = self._build_file_payload_from_destination(
+            canonical_destination,
+            size,
+        )
+        if not built:
+            self._log_ignored(
+                destination,
+                self._payload_ignore_reason(canonical_destination),
+            )
+            return
+        kind, payload = built
+        if kind == "subtitle":
+            targets = [Path(str(payload.get("local_file") or local_target))]
+        else:
+            targets = self._strm_delete_candidates(local_target)
+
+        deleted: List[str] = []
+        for target in targets:
+            try:
+                if target.is_file() or target.is_symlink():
+                    target.unlink()
+                    deleted.append(str(target))
+            except Exception as exc:
+                logger.warning(
+                    "【CD2 STRM触发器】删除同步失败：cd2=%s local=%s 原因=%s",
+                    canonical_destination,
+                    target,
+                    exc,
+                )
+
+        removed_dirs: List[str] = []
+        if deleted:
+            for target in targets:
+                removed_dirs.extend(self._remove_empty_dirs(target.parent, local_root))
+            # 同一目录可能被多个目标重复返回，日志和状态只保留一次。
+            removed_dirs = list(dict.fromkeys(removed_dirs))
+            self._record_delete_result(
+                canonical_destination,
+                deleted + removed_dirs,
+                kind=kind,
+            )
+            self._request_emby_refresh("delete", len(deleted))
+        else:
+            self._record_delete_missing(canonical_destination)
+            logger.info(
+                "【CD2 STRM触发器】删除同步：本地未找到对应文件：kind=%s cd2=%s candidates=%s",
+                kind,
+                canonical_destination,
+                ",".join(str(item) for item in targets),
+            )
+
+    @staticmethod
+    def _strm_delete_candidates(source: Path) -> List[Path]:
+        """返回默认 STRM 命名规则下可能对应的本地文件。"""
+        candidates = [source.with_suffix(".strm")]
+        if source.suffix.lower() == ".iso":
+            candidates.insert(0, source.with_name(source.name + ".strm"))
+        else:
+            # 兼容曾经使用“原文件名 + .strm”的命名模板。
+            candidates.append(source.with_name(source.name + ".strm"))
+        unique: List[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            key = str(candidate)
+            if key not in seen:
+                seen.add(key)
+                unique.append(candidate)
+        return unique
+
+    @staticmethod
+    def _remove_empty_dirs(start: Path, root: Path) -> List[str]:
+        """从 start 向上删除空目录，但永远不删除配置的本地根目录。"""
+        root = Path(root).expanduser()
+        current = Path(start)
+        if root == Path("/"):
+            return []
+        try:
+            current.relative_to(root)
+        except ValueError:
+            return []
+
+        removed: List[str] = []
+        while current != root:
+            if not current.is_dir():
+                break
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            removed.append(str(current))
+            current = current.parent
+        return removed
+
+    def _record_delete_result(
+        self, canonical_destination: str, local_paths: List[str], kind: str
+    ) -> None:
+        """记录一次成功的本地删除同步。"""
+        with self._state_lock:
+            self._stats["delete_sync_count"] += 1
+            self._stats["last_delete_at"] = self._now()
+            self._stats["last_delete_path"] = canonical_destination
+            self._stats["last_delete_local_paths"] = local_paths
+        logger.info(
+            "【CD2 STRM触发器】删除同步成功：kind=%s cd2=%s local=%s",
+            kind,
+            canonical_destination,
+            ",".join(local_paths),
+        )
+
+    def _record_delete_missing(self, canonical_destination: str) -> None:
+        """记录删除事件未找到本地目标的情况。"""
+        with self._state_lock:
+            self._stats["delete_sync_missing_count"] += 1
+            self._stats["last_delete_at"] = self._now()
+            self._stats["last_delete_path"] = canonical_destination
+            self._stats["last_delete_local_paths"] = []
 
     def _enqueue_payload(
         self,
@@ -1259,9 +1474,68 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._refresh_emby_batch(succeeded_payloads)
         self._record_trigger_result(result, len(succeeded), len(failed))
 
+    def _request_emby_refresh(self, reason: str, item_count: int = 1) -> None:
+        """将媒体、字幕或删除事件加入同一个 Emby 刷新防抖窗口。"""
+        if not self._config.get("media_server_refresh"):
+            return
+        now = time.monotonic()
+        delay = float(self._config.get("emby_refresh_debounce", 5.0))
+        with self._emby_refresh_lock:
+            self._emby_refresh_pending = True
+            self._emby_refresh_deadline = now + max(0.0, delay)
+            self._emby_refresh_pending_count += max(1, int(item_count or 1))
+            self._emby_refresh_reasons.add(self._text(reason) or "unknown")
+            pending_count = self._emby_refresh_pending_count
+        with self._state_lock:
+            self._stats["emby_refresh_pending_count"] = pending_count
+        self._emby_refresh_wake_event.set()
+        logger.info(
+            "【CD2 STRM触发器】Emby 刷新加入防抖队列：reason=%s，累计文件/事件=%s，等待=%s 秒",
+            reason,
+            pending_count,
+            delay,
+        )
+
     def _refresh_emby_batch(self, payloads: List[Dict[str, Any]]) -> None:
-        """在一批 STRM 生成成功后向每个已配置的 Emby 发送一次刷新请求。"""
-        if not self._config.get("media_server_refresh") or not payloads:
+        """在一批 STRM 生成成功后请求一次防抖 Emby 刷新。"""
+        if payloads:
+            self._request_emby_refresh("strm", len(payloads))
+
+    def _emby_refresh_loop(self) -> None:
+        """等待媒体/字幕/删除事件稳定后，向每个 Emby 发送一次刷新请求。"""
+        while not self._stop_event.is_set():
+            with self._emby_refresh_lock:
+                pending = self._emby_refresh_pending
+                deadline = self._emby_refresh_deadline
+            if not pending:
+                self._emby_refresh_wake_event.wait(timeout=1)
+                self._emby_refresh_wake_event.clear()
+                continue
+
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                self._emby_refresh_wake_event.wait(timeout=remaining)
+                self._emby_refresh_wake_event.clear()
+                continue
+
+            with self._emby_refresh_lock:
+                if not self._emby_refresh_pending:
+                    continue
+                if self._emby_refresh_deadline > time.monotonic():
+                    continue
+                item_count = self._emby_refresh_pending_count
+                reasons = ",".join(sorted(self._emby_refresh_reasons)) or "unknown"
+                self._emby_refresh_pending = False
+                self._emby_refresh_deadline = 0.0
+                self._emby_refresh_pending_count = 0
+                self._emby_refresh_reasons.clear()
+            with self._state_lock:
+                self._stats["emby_refresh_pending_count"] = 0
+            self._perform_emby_refresh(item_count, reasons)
+
+    def _perform_emby_refresh(self, item_count: int, reasons: str) -> None:
+        """通过 MoviePilot 已配置的 Emby 服务执行一次批次刷新。"""
+        if not self._config.get("media_server_refresh"):
             return
 
         try:
@@ -1282,8 +1556,9 @@ class Cd2UploadStrmTrigger(_PluginBase):
 
         server_names = list(services.keys())
         logger.info(
-            "【CD2 STRM触发器】开始 Emby 批次刷新：STRM成功=%s，目标服务器=%s；每个服务器本批仅请求一次",
-            len(payloads),
+            "【CD2 STRM触发器】开始 Emby 批次刷新：累计文件/事件=%s，原因=%s，目标服务器=%s；每个服务器本批仅请求一次",
+            item_count,
+            reasons,
             ",".join(server_names),
         )
         refreshed_servers: List[str] = []
@@ -1306,16 +1581,16 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 if refresh():
                     refreshed_servers.append(name)
                     logger.info(
-                        "【CD2 STRM触发器】Emby 批次刷新请求已发送：server=%s，文件数=%s",
+                        "【CD2 STRM触发器】Emby 批次刷新请求已发送：server=%s，累计文件/事件=%s",
                         name,
-                        len(payloads),
+                        item_count,
                     )
                 else:
                     errors.append(f"{name}:Emby API 返回失败")
                     logger.warning(
-                        "【CD2 STRM触发器】Emby 批次刷新失败：server=%s，文件数=%s",
+                        "【CD2 STRM触发器】Emby 批次刷新失败：server=%s，累计文件/事件=%s",
                         name,
-                        len(payloads),
+                        item_count,
                     )
             except Exception as exc:
                 errors.append(f"{name}:{exc}")
@@ -1335,8 +1610,8 @@ class Cd2UploadStrmTrigger(_PluginBase):
             )
         else:
             logger.info(
-                "【CD2 STRM触发器】Emby 批次刷新完成：本批文件=%s，API请求=%s",
-                len(payloads),
+                "【CD2 STRM触发器】Emby 批次刷新完成：累计文件/事件=%s，API请求=%s",
+                item_count,
                 request_count,
             )
 
@@ -1497,6 +1772,8 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._wake_event.set()
         if hasattr(self, "_subtitle_wake_event"):
             self._subtitle_wake_event.set()
+        if hasattr(self, "_emby_refresh_wake_event"):
+            self._emby_refresh_wake_event.set()
         with self._state_lock:
             push_client = self._push_client
             self._push_client = None
@@ -1506,5 +1783,13 @@ class Cd2UploadStrmTrigger(_PluginBase):
             if thread.is_alive() and thread is not threading.current_thread():
                 thread.join(timeout=3)
         self._threads = []
+        if hasattr(self, "_emby_refresh_lock"):
+            with self._emby_refresh_lock:
+                self._emby_refresh_pending = False
+                self._emby_refresh_deadline = 0.0
+                self._emby_refresh_pending_count = 0
+                self._emby_refresh_reasons.clear()
+        if hasattr(self, "_emby_refresh_wake_event"):
+            self._emby_refresh_wake_event.clear()
         with self._state_lock:
             self._stats["running"] = False

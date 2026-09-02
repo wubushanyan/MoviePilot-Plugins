@@ -143,9 +143,98 @@ def test_emby_is_refreshed_once_for_one_strm_batch(monkeypatch):
             return {"家庭 Emby": type("Service", (), {"instance": fake_emby})()}
 
     monkeypatch.setattr(plugin_module, "MediaServerHelper", FakeHelper)
-    plugin._refresh_emby_batch(
-        [{"pan_path": "/影视库/电影/a.mkv"}, {"pan_path": "/影视库/电影/b.mkv"}]
-    )
+    plugin._perform_emby_refresh(2, "strm,subtitle")
     assert fake_emby.calls == 1
     assert plugin._stats["emby_refresh_batch_count"] == 1
     assert plugin._stats["emby_refresh_request_count"] == 1
+
+
+def test_media_and_subtitle_refresh_requests_share_debounce_window():
+    """验证媒体和字幕事件会合并到同一个刷新窗口。"""
+    plugin = _make_plugin()
+    plugin._config["media_server_refresh"] = True
+    plugin._config["emby_refresh_debounce"] = 5
+    plugin._state_lock = threading.RLock()
+    plugin._emby_refresh_lock = threading.RLock()
+    plugin._emby_refresh_wake_event = threading.Event()
+    plugin._request_emby_refresh("strm", 2)
+    plugin._request_emby_refresh("subtitle", 1)
+    assert plugin._emby_refresh_pending is True
+    assert plugin._emby_refresh_pending_count == 3
+    assert plugin._emby_refresh_reasons == {"strm", "subtitle"}
+    assert plugin._stats["emby_refresh_pending_count"] == 3
+
+
+def test_delete_sync_removes_subtitle_and_empty_directories(tmp_path):
+    """验证删除 CD2 字幕会删除本地字幕并清理空目录。"""
+    plugin = _make_plugin()
+    plugin._config["delete_sync"] = True
+    plugin._config["media_server_refresh"] = False
+    plugin._ready_event = threading.Event()
+    plugin._ready_event.set()
+    plugin._state_lock = threading.RLock()
+    plugin._emby_refresh_lock = threading.RLock()
+    plugin._emby_refresh_wake_event = threading.Event()
+    plugin._stop_event = threading.Event()
+    local_root = tmp_path / "影视库"
+    local_file = local_root / "电影" / "新目录" / "a.sup"
+    local_file.parent.mkdir(parents=True)
+    local_file.write_bytes(b"subtitle")
+    plugin._config["rules"] = plugin._normalize_config(
+        {
+            "rules": [
+                {
+                    "cd2_prefix": "/影视库",
+                    "pan_prefix": "/影视库",
+                    "local_path": str(local_root),
+                }
+            ],
+            "delete_sync": True,
+        }
+    )["rules"]
+    change = clouddrive_pb2.FileSystemChange(
+        changeType=clouddrive_pb2.FileSystemChange.DELETE,
+        isDirectory=False,
+        path="/115/影视库/电影/新目录/a.sup",
+    )
+    plugin._observe_file_system_change(change)
+    assert not local_file.exists()
+    assert not local_file.parent.exists()
+    assert (local_root / "电影").exists() is False
+    assert plugin._stats["delete_sync_count"] == 1
+
+
+def test_delete_sync_removes_default_strm_name(tmp_path):
+    """验证删除 CD2 媒体文件会删除默认命名的 STRM。"""
+    plugin = _make_plugin()
+    plugin._config["delete_sync"] = True
+    plugin._ready_event = threading.Event()
+    plugin._ready_event.set()
+    plugin._state_lock = threading.RLock()
+    plugin._emby_refresh_lock = threading.RLock()
+    plugin._emby_refresh_wake_event = threading.Event()
+    plugin._stop_event = threading.Event()
+    local_root = tmp_path / "影视库"
+    strm_file = local_root / "电影" / "a.strm"
+    strm_file.parent.mkdir(parents=True)
+    strm_file.write_text("url", encoding="utf-8")
+    plugin._config["rules"] = plugin._normalize_config(
+        {
+            "rules": [
+                {
+                    "cd2_prefix": "/影视库",
+                    "pan_prefix": "/影视库",
+                    "local_path": str(local_root),
+                }
+            ],
+            "delete_sync": True,
+        }
+    )["rules"]
+    change = clouddrive_pb2.FileSystemChange(
+        changeType=clouddrive_pb2.FileSystemChange.DELETE,
+        isDirectory=False,
+        path="/115/影视库/电影/a.mkv",
+    )
+    plugin._observe_file_system_change(change)
+    assert not strm_file.exists()
+    assert not (local_root / "电影").exists()

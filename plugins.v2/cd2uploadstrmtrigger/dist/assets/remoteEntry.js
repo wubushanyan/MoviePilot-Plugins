@@ -73,7 +73,7 @@ function createUsageView(h, onBack, onClose) {
     h("div", { class: "cd2-trigger-subtitle" }, "CD2 上传完成后，媒体文件生成 STRM，字幕文件下载到同一媒体目录。"),
     h("div", { class: "cd2-trigger-card" }, [
       h("strong", "处理流程"),
-      h("div", { class: "cd2-trigger-help-flow" }, "CD2 上传完成 → PushMessage/文件变更消息或快速补扫捕获 → 命中目录规则 → 媒体文件调用 115 STRM 助手生成 STRM → 本插件按批次调用 Emby 刷新；字幕文件由本插件从 CD2 下载到本地。插件启动后的第一次成功扫描只建立状态基线，已存在的完成任务不会补处理。"),
+      h("div", { class: "cd2-trigger-help-flow" }, "CD2 上传完成 → PushMessage/文件变更消息或快速补扫捕获 → 命中目录规则 → 媒体文件调用 115 STRM 助手生成 STRM，字幕文件由本插件从 CD2 下载到本地 → 媒体、字幕和删除事件进入同一个 Emby 刷新防抖窗口；窗口内每个已配置 Emby 只请求一次。插件启动后的第一次成功扫描只建立状态基线，已存在的完成任务不会补处理。"),
     ]),
     h("div", { class: "cd2-trigger-card" }, [
       h("strong", "网页/公网远程上传"),
@@ -101,7 +101,7 @@ function createUsageView(h, onBack, onClose) {
     ]),
     h("div", { class: "cd2-trigger-card" }, [
       h("strong", "四个生成后选项由谁执行"),
-      h("div", { class: "cd2-trigger-help-flow" }, "“自动刮削元数据”由 115 STRM 助手调用 MoviePilot 的元数据刮削链路执行，不是 Emby MediaInfoKeeper；“刷新媒体服务器”由本插件调用 MoviePilot 已配置的 Emby API，并在每批 STRM 生成完成后每个 Emby 只请求一次；“自动下载媒体元数据”由 115 STRM 助手的 MediaInfoDownloader 按自身扩展名配置执行。本插件只把媒体任务参数交给 115 助手，并负责字幕下载和批次 Emby 刷新。“发送生成结果通知”由本插件调用 MoviePilot 的 post_message，使用 MP 已配置的通知渠道（例如 Telegram），通知的是 STRM 批次结果，不会逐个发送字幕通知。"),
+      h("div", { class: "cd2-trigger-help-flow" }, "“自动刮削元数据”由 115 STRM 助手调用 MoviePilot 的元数据刮削链路执行，不是 Emby MediaInfoKeeper；“刷新媒体服务器”由本插件调用 MoviePilot 已配置的 Emby API，媒体 STRM 生成成功、字幕下载成功或本地删除同步成功都会进入防抖窗口；“自动下载媒体元数据”由 115 STRM 助手的 MediaInfoDownloader 按自身扩展名配置执行。本插件只把媒体任务参数交给 115 助手，并负责字幕下载、删除同步和批次 Emby 刷新。“发送生成结果通知”由本插件调用 MoviePilot 的 post_message，使用 MP 已配置的通知渠道（例如 Telegram），通知的是 STRM 批次结果，不会逐个发送字幕通知。"),
     ]),
     h("div", { class: "cd2-trigger-actions" }, [
       h("button", { type: "button", class: "cd2-trigger-btn primary", onClick: onBack }, "返回"),
@@ -140,6 +140,8 @@ async function createConfigModule() {
         subtitle_extensions: "srt,ssa,ass,vtt,sub,idx,sup",
         subtitle_interval: 3,
         subtitle_stability_delay: 3,
+        emby_refresh_debounce: 5,
+        delete_sync: false,
         scrape_metadata: false,
         media_server_refresh: false,
         auto_download_mediainfo: false,
@@ -270,12 +272,14 @@ async function createConfigModule() {
             field("字幕扩展名（下载，逗号分隔）", "subtitle_extensions", "srt,ssa,ass,vtt,sub,idx,sup"),
             numberField("字幕下载间隔（秒）", "subtitle_interval", 0, 60, 0.5),
             numberField("字幕稳定等待（秒）", "subtitle_stability_delay", 0, 60, 0.5),
+            numberField("Emby 刷新防抖（秒）", "emby_refresh_debounce", 0, 120, 0.5),
           ]),
           checkField("由 115 STRM 助手刮削元数据", "scrape_metadata"),
-          checkField("由本插件刷新 Emby（每批一次）", "media_server_refresh"),
+          checkField("由本插件刷新 Emby（媒体/字幕/删除，防抖）", "media_server_refresh"),
+          checkField("同步 CD2 删除到本地（仅删除对应字幕/STRM和空目录）", "delete_sync"),
           checkField("由 115 STRM 助手下载 .nfo/.jpg 等媒体元数据", "auto_download_mediainfo"),
           checkField("发送 STRM 生成结果通知（使用 MoviePilot 通知渠道）", "notify"),
-          h("div", { class: "cd2-trigger-hint" }, "启动后的第一次成功扫描固定只建立基线，已有完成任务不会处理；后续新完成任务才会触发。PushMessage 优先，轮询作断线兜底；STRM 最多 100 个一批提交；开启 Emby 刷新后，115 STRM 生成成功的每一批向每个已配置 Emby 发送一次 Library/Refresh 请求，字幕单线程按间隔下载。"),
+          h("div", { class: "cd2-trigger-hint" }, "启动后的第一次成功扫描固定只建立基线，已有完成任务不会处理；后续新完成任务才会触发。PushMessage 优先，轮询作断线兜底；STRM 最多 100 个一批提交。开启 Emby 刷新后，媒体 STRM、外挂字幕下载和删除同步都会进入同一个防抖窗口，窗口结束后每个已配置 Emby 只发送一次 Library/Refresh 请求。删除同步默认关闭，开启后仅删除对应本地字幕/STRM及空目录，不递归删除文件。"),
         ]),
         message.value ? h("div", { class: `cd2-trigger-message${messageError.value ? " cd2-trigger-error" : ""}` }, message.value) : null,
         h("div", { class: "cd2-trigger-actions" }, [
@@ -406,10 +410,20 @@ async function createPageModule() {
             h("div", { class: "cd2-trigger-row" }, [
               h("span", `批次：${status.value.emby_refresh_batch_count ?? 0}`),
               h("span", `API请求：${status.value.emby_refresh_request_count ?? 0}`),
+              h("span", `待合并：${status.value.emby_refresh_pending_count ?? 0}`),
               h("span", `服务器：${(status.value.last_emby_refresh_servers || []).join(", ") || "暂无"}`),
               h("span", { class: "cd2-trigger-muted" }, status.value.last_emby_refresh_at || "暂无记录"),
             ]),
             status.value.last_emby_refresh_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近刷新错误：${status.value.last_emby_refresh_error}`) : null,
+          ]),
+          h("div", { class: "cd2-trigger-card" }, [
+            h("strong", "CD2 删除同步"),
+            h("div", { class: "cd2-trigger-row" }, [
+              h("span", `成功：${status.value.delete_sync_count ?? 0}`),
+              h("span", `未找到本地文件：${status.value.delete_sync_missing_count ?? 0}`),
+              h("span", { class: "cd2-trigger-muted" }, status.value.last_delete_path ? `最近：${status.value.last_delete_path}` : "暂无记录"),
+            ]),
+            status.value.last_delete_local_paths?.length ? h("div", { class: "cd2-trigger-path" }, status.value.last_delete_local_paths.join("\n")) : null,
           ]),
           h("div", { class: "cd2-trigger-card" }, [
             h("strong", "字幕下载"),

@@ -1,14 +1,15 @@
 {
   "Cd2UploadStrmTrigger": {
     "name": "CD2 上传触发 115 STRM",
-    "description": "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体生成 115 STRM，字幕按限速下载到本地，并可由本插件按批次刷新 Emby。",
+    "description": "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体生成 115 STRM，字幕按限速下载到本地，并可由本插件批量刷新 Emby 和同步删除。",
     "labels": "网盘工具,STRM,字幕,CloudDrive2",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "icon": "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png",
     "author": "wubushanyan",
     "level": 1,
     "system_version": ">=2.15.0",
     "history": {
+      "v0.5.0": "外挂字幕和删除同步也触发 Emby 防抖刷新；增加 CD2 删除到本地的安全同步和空目录清理。",
       "v0.4.0": "Emby 刷新改由本插件按 STRM 批次统一请求，禁止 115 STRM 助手逐文件刷新，并增加刷新状态日志。",
       "v0.3.0": "增加 RemoteUpload 文件系统变更监听、上传推送快速补扫、CD2 多路径归一化、原始任务诊断日志和字幕上传稳定性确认。",
       "v0.2.0": "增加字幕文件下载与限速；启动固定建立基线且不处理已有完成任务；增加目录用途说明、状态页设置入口，并修复按钮文字颜色。",
