@@ -51,9 +51,10 @@ function injectStyle() {
     .cd2-trigger-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
     .cd2-trigger-field{display:flex;flex-direction:column;gap:6px;font-size:13px}.cd2-trigger-field input,.cd2-trigger-field textarea{box-sizing:border-box;width:100%;border:1px solid rgba(127,127,127,.4);border-radius:6px;padding:9px;background:transparent;color:inherit;font:inherit}
     .cd2-trigger-field textarea{min-height:78px;resize:vertical}.cd2-trigger-check{display:flex;gap:8px;align-items:center;margin:10px 0;font-size:14px}
-    .cd2-trigger-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.cd2-trigger-btn{border:0;border-radius:6px;padding:9px 14px;cursor:pointer;background:#424242;color:#fff}.cd2-trigger-btn.primary{background:#1976d2}.cd2-trigger-btn.danger{background:#b3261e}.cd2-trigger-btn:disabled{opacity:.55;cursor:default}
+    .cd2-trigger-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:14px}.cd2-trigger-btn,.cd2-trigger-btn:visited,.cd2-trigger-btn:hover,.cd2-trigger-btn:focus{color:#fff !important;-webkit-text-fill-color:#fff !important}.cd2-trigger-btn{appearance:none;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;background:#424242;font:inherit;line-height:1.25}.cd2-trigger-btn.primary{background:#1976d2}.cd2-trigger-btn.danger{background:#b3261e}.cd2-trigger-btn:disabled{opacity:.55;cursor:default}
     .cd2-trigger-rule{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:12px;margin:10px 0}.cd2-trigger-rule-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:600}.cd2-trigger-hint{font-size:12px;opacity:.7;line-height:1.6;margin-top:8px}.cd2-trigger-message{border-radius:6px;padding:10px;margin-top:12px;background:rgba(25,118,210,.12)}.cd2-trigger-error{background:rgba(211,47,47,.15)}
     .cd2-trigger-stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.cd2-trigger-stat{padding:12px;border-radius:8px;background:rgba(127,127,127,.08)}.cd2-trigger-stat strong{display:block;font-size:20px;margin-top:4px}.cd2-trigger-muted{opacity:.68}.cd2-trigger-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}.cd2-trigger-pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:12px;background:rgba(127,127,127,.16)}.cd2-trigger-pill.ok{background:rgba(46,125,50,.2)}.cd2-trigger-pill.bad{background:rgba(211,47,47,.2)}
+    .cd2-trigger-help-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}.cd2-trigger-help-item{padding:12px;border-radius:8px;background:rgba(127,127,127,.08);line-height:1.65}.cd2-trigger-help-item strong{display:block;margin-bottom:4px}.cd2-trigger-help-code{display:inline-block;padding:2px 5px;border-radius:4px;background:rgba(127,127,127,.14);font-family:monospace;word-break:break-all}.cd2-trigger-help-flow{font-size:13px;line-height:1.8}
   `;
   document.head.appendChild(style);
 }
@@ -63,6 +64,44 @@ function apiResult(response) {
   let value = response;
   if (value?.data?.success !== undefined) value = value.data;
   return value;
+}
+
+function createUsageView(h, onBack, onClose) {
+  /* 插件内置使用说明，避免用户反复退出页面查找配置含义。 */
+  return h("div", { class: "cd2-trigger-page" }, [
+    h("div", { class: "cd2-trigger-title" }, "使用说明"),
+    h("div", { class: "cd2-trigger-subtitle" }, "CD2 上传完成后，媒体文件生成 STRM，字幕文件下载到同一媒体目录。"),
+    h("div", { class: "cd2-trigger-card" }, [
+      h("strong", "处理流程"),
+      h("div", { class: "cd2-trigger-help-flow" }, "CD2 上传完成 → 命中目录规则 → 媒体文件调用 115 STRM 助手生成 STRM；字幕文件由本插件从 CD2 下载到本地。插件启动后的第一次成功扫描只建立状态基线，已存在的完成任务不会补处理。"),
+    ]),
+    h("div", { class: "cd2-trigger-card" }, [
+      h("strong", "目录映射三段的实际用途"),
+      h("div", { class: "cd2-trigger-help-grid" }, [
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "CD2 目标目录前缀"), h("span", "CD2 任务的 destPath 起始目录，只监控这个目录及其子目录。例如 /CloudNAS/115/影视库。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "115 网盘路径前缀"), h("span", "对应 115 网盘中的媒体库根目录，用来组成 STRM 的 pan_path。例如 /影视库。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "本地 STRM 根目录"), h("span", "MoviePilot/Emby 实际能看到的本地媒体目录。STRM 和字幕会按相同相对目录落在这里。")]),
+      ]),
+      h("div", { class: "cd2-trigger-hint" }, "示例：/CloudNAS/115/影视库/电影/a.mkv → 115 /影视库/电影/a.mkv → 本地 /media/MP_movieDB/影视库/电影下的对应 STRM 文件。"),
+    ]),
+    h("div", { class: "cd2-trigger-card" }, [
+      h("strong", "媒体、字幕和附加动作"),
+      h("div", { class: "cd2-trigger-help-grid" }, [
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "媒体扩展名"), h("span", "命中后提交给 115 STRM 助手生成 STRM，不下载原媒体文件。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "字幕扩展名"), h("span", "默认 srt、ssa、ass、vtt、sub、idx；由本插件直接从 CD2 下载，不生成 STRM。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "字幕下载间隔"), h("span", "单线程串行下载，控制每次字幕下载请求的最小间隔；设置为 0 表示不额外等待。")]),
+      ]),
+      h("div", { class: "cd2-trigger-hint" }, "“自动下载媒体元数据”是 115 STRM 助手按自身 user_download_mediaext 配置下载 .nfo、图片等文件的开关，不等于本插件的字幕下载；本插件的字幕任务不会把这个开关传给 115 助手。"),
+    ]),
+    h("div", { class: "cd2-trigger-card" }, [
+      h("strong", "四个生成后选项由谁执行"),
+      h("div", { class: "cd2-trigger-help-flow" }, "“自动刮削元数据”由 115 STRM 助手调用 MoviePilot 的元数据刮削链路执行，不是 Emby MediaInfoKeeper；“刷新媒体服务器”由 115 STRM 助手调用其媒体服务器刷新逻辑；“自动下载媒体元数据”由 115 STRM 助手的 MediaInfoDownloader 按自身扩展名配置执行。本插件只把媒体任务参数交给 115 助手，并负责字幕下载。“发送生成结果通知”由本插件调用 MoviePilot 的 post_message，使用 MP 已配置的通知渠道（例如 Telegram），通知的是 STRM 批次结果，不会逐个发送字幕通知。"),
+    ]),
+    h("div", { class: "cd2-trigger-actions" }, [
+      h("button", { type: "button", class: "cd2-trigger-btn primary", onClick: onBack }, "返回"),
+      h("button", { type: "button", class: "cd2-trigger-btn", onClick: onClose }, "关闭"),
+    ]),
+  ]);
 }
 
 async function createConfigModule() {
@@ -90,8 +129,9 @@ async function createConfigModule() {
         poll_interval: 5,
         batch_window: 5,
         page_size: 200,
-        baseline_on_start: true,
-        include_extensions: "mkv,mp4,ts,avi,mov,m4v,wmv,flv,m2ts,iso,rmvb,webm",
+        include_extensions: "mkv,mp4,ts,avi,mov,m4v,wmv,flv,m2ts,iso,rmvb,webm,mpeg,mpg,3gp,asf,tp,f4v",
+        subtitle_extensions: "srt,ssa,ass,vtt,sub,idx",
+        subtitle_interval: 3,
         scrape_metadata: false,
         media_server_refresh: false,
         auto_download_mediainfo: false,
@@ -102,6 +142,7 @@ async function createConfigModule() {
       const message = ref("");
       const messageError = ref(false);
       const testing = ref(false);
+      const showHelp = ref(false);
 
       function setMessage(text, error = false) {
         /* 更新配置页面提示信息。 */
@@ -133,12 +174,12 @@ async function createConfigModule() {
         ]);
       }
 
-      function numberField(label, key, min, max) {
+      function numberField(label, key, min, max, step = 1) {
         /* 创建数字配置控件。 */
         return h("label", { class: "cd2-trigger-field" }, [
           h("span", label),
           h("input", {
-            type: "number", min, max, value: config[key],
+            type: "number", min, max, step, value: config[key],
             onInput: (event) => { config[key] = Number(event.target.value); },
           }),
         ]);
@@ -171,14 +212,21 @@ async function createConfigModule() {
         emit("save", clone(config));
       }
 
+      function closeHelp() {
+        /* 返回配置表单。 */
+        showHelp.value = false;
+      }
+
       onMounted(() => {
         /* 确保旧版本配置缺少规则数组时仍可编辑。 */
         if (!Array.isArray(config.rules)) config.rules = [];
       });
 
-      return () => h("form", { class: "cd2-trigger-config", onSubmit: (event) => { event.preventDefault(); save(); } }, [
+      return () => showHelp.value
+        ? createUsageView(h, closeHelp, () => emit("close"))
+        : h("form", { class: "cd2-trigger-config", onSubmit: (event) => { event.preventDefault(); save(); } }, [
         h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
-        h("div", { class: "cd2-trigger-subtitle" }, "监听 CloudDrive2 上传完成状态，只为命中目录规则的媒体文件生成精确增量 STRM。"),
+        h("div", { class: "cd2-trigger-subtitle" }, "监听 CloudDrive2 上传完成状态：媒体生成 STRM，字幕按限速下载。"),
         h("div", { class: "cd2-trigger-card" }, [
           checkField("启用插件", "enabled"),
           h("div", { class: "cd2-trigger-grid" }, [
@@ -187,11 +235,11 @@ async function createConfigModule() {
             field("MoviePilot 地址", "moviepilot_url", "http://127.0.0.1:3001"),
             field("MoviePilot API Key（可选）", "moviepilot_api_key", "留空则使用系统 API_TOKEN", true),
           ]),
-          h("div", { class: "cd2-trigger-hint" }, "CD2 Token 需要开启“获取传输任务”和“接收推送消息”权限。MoviePilot API Key 留空时，插件会尝试使用当前实例的系统 API_TOKEN。"),
+          h("div", { class: "cd2-trigger-hint" }, "CD2 Token 需要开启“获取传输任务”和“接收推送消息”权限；要下载字幕，还需开启文件读取里的“列出文件、读取文件、查看属性”。MoviePilot API Key 留空时，插件会尝试使用当前实例的系统 API_TOKEN。"),
         ]),
         h("div", { class: "cd2-trigger-card" }, [
           h("div", { class: "cd2-trigger-row" }, [h("strong", "目录映射规则"), h("button", { type: "button", class: "cd2-trigger-btn", onClick: addRule }, "添加规则")]),
-          h("div", { class: "cd2-trigger-hint" }, "每条规则把 CD2 的目标路径转换成 115 网盘路径和本地 STRM 根目录；匹配采用目录边界，不会把 /电影2 误判为 /电影。"),
+          h("div", { class: "cd2-trigger-hint" }, "CD2 前缀负责监控范围；115 前缀负责生成 STRM 的网盘路径；本地根目录是 MP/Emby 读取 STRM 和字幕的位置。匹配采用目录边界，不会把 /电影2 误判为 /电影。"),
           ...config.rules.map((rule, index) => h("div", { class: "cd2-trigger-rule", key: index }, [
             h("div", { class: "cd2-trigger-rule-head" }, [h("span", `规则 ${index + 1}`), h("button", { type: "button", class: "cd2-trigger-btn danger", onClick: () => removeRule(index) }, "删除")]),
             h("label", { class: "cd2-trigger-check" }, [h("input", { type: "checkbox", checked: !!rule.enabled, onChange: (event) => { rule.enabled = event.target.checked; } }), h("span", "启用此规则")]),
@@ -210,16 +258,18 @@ async function createConfigModule() {
             numberField("批处理等待（秒）", "batch_window", 0, 120),
             numberField("每页任务数", "page_size", 20, 1000),
             field("媒体扩展名（逗号分隔）", "include_extensions", "mkv,mp4,ts"),
+            field("字幕扩展名（下载，逗号分隔）", "subtitle_extensions", "srt,ssa,ass,vtt,sub,idx"),
+            numberField("字幕下载间隔（秒）", "subtitle_interval", 0, 60, 0.5),
           ]),
-          checkField("启动时仅建立基线，不处理已有完成任务", "baseline_on_start"),
-          checkField("生成后自动刮削元数据", "scrape_metadata"),
-          checkField("生成后刷新媒体服务器", "media_server_refresh"),
-          checkField("自动下载媒体元数据", "auto_download_mediainfo"),
-          checkField("发送生成结果通知", "notify"),
-          h("div", { class: "cd2-trigger-hint" }, "状态监听优先使用 PushMessage，轮询作为断线兜底；任务会按最多 100 个一批提交给 115 助手。"),
+          checkField("由 115 STRM 助手刮削元数据", "scrape_metadata"),
+          checkField("由 115 STRM 助手刷新媒体服务器", "media_server_refresh"),
+          checkField("由 115 STRM 助手下载 .nfo/.jpg 等媒体元数据", "auto_download_mediainfo"),
+          checkField("发送 STRM 生成结果通知（使用 MoviePilot 通知渠道）", "notify"),
+          h("div", { class: "cd2-trigger-hint" }, "启动后的第一次成功扫描固定只建立基线，已有完成任务不会处理；后续新完成任务才会触发。PushMessage 优先，轮询作断线兜底；STRM 最多 100 个一批提交，字幕单线程按间隔下载。"),
         ]),
         message.value ? h("div", { class: `cd2-trigger-message${messageError.value ? " cd2-trigger-error" : ""}` }, message.value) : null,
         h("div", { class: "cd2-trigger-actions" }, [
+          h("button", { type: "button", class: "cd2-trigger-btn", onClick: () => { showHelp.value = true; } }, "使用说明"),
           h("button", { type: "button", class: "cd2-trigger-btn", disabled: testing.value, onClick: testConnection }, testing.value ? "测试中…" : "测试连接"),
           h("button", { type: "submit", class: "cd2-trigger-btn primary" }, "保存配置"),
           h("button", { type: "button", class: "cd2-trigger-btn", onClick: () => emit("close") }, "关闭"),
@@ -250,6 +300,7 @@ async function createPageModule() {
       const loading = ref(false);
       const triggering = ref(false);
       const message = ref("");
+      const showHelp = ref(false);
       let timer = null;
 
       async function loadStatus() {
@@ -284,6 +335,11 @@ async function createPageModule() {
         return h("div", { class: "cd2-trigger-stat" }, [h("span", { class: "cd2-trigger-muted" }, label), h("strong", String(value ?? 0))]);
       }
 
+      function closeHelp() {
+        /* 返回状态页。 */
+        showHelp.value = false;
+      }
+
       onMounted(() => {
         loadStatus();
         timer = setInterval(loadStatus, 10000);
@@ -291,6 +347,7 @@ async function createPageModule() {
       onUnmounted(() => { if (timer) clearInterval(timer); });
 
       return () => {
+        if (showHelp.value) return createUsageView(h, closeHelp, () => emit("close"));
         const last = status.value.last_trigger || {};
         const connected = !!status.value.connected;
         return h("div", { class: "cd2-trigger-page" }, [
@@ -306,7 +363,8 @@ async function createPageModule() {
               stat("CD2 当前任务", status.value.upload_count),
               stat("本轮列表任务", status.value.task_count),
               stat("命中规则", status.value.matched_count),
-              stat("待生成", status.value.pending_count),
+              stat("待生成 STRM", status.value.strm_pending_count ?? status.value.pending_count),
+              stat("待下载字幕", status.value.subtitle_pending_count),
               stat("已处理", status.value.processed_count),
               stat("轮询次数", status.value.poll_count),
             ]),
@@ -316,15 +374,26 @@ async function createPageModule() {
             h("div", { class: "cd2-trigger-row" }, [
               h("span", `成功：${last.success_count ?? 0}`),
               h("span", `失败：${last.fail_count ?? 0}`),
-              h("span", `元数据：${last.download_success_count ?? 0}`),
+              h("span", `助手元数据：${last.download_success_count ?? 0}`),
               h("span", { class: "cd2-trigger-muted" }, status.value.last_trigger_at || "暂无记录"),
             ]),
           ]),
+          h("div", { class: "cd2-trigger-card" }, [
+            h("strong", "字幕下载"),
+            h("div", { class: "cd2-trigger-row" }, [
+              h("span", `成功：${status.value.subtitle_success_count ?? 0}`),
+              h("span", `失败：${status.value.subtitle_fail_count ?? 0}`),
+              h("span", { class: "cd2-trigger-muted" }, status.value.last_subtitle_file ? `最近：${status.value.last_subtitle_file}` : "暂无记录"),
+            ]),
+          ]),
           status.value.last_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, status.value.last_error) : null,
+          status.value.last_subtitle_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近字幕错误：${status.value.last_subtitle_error}`) : null,
           message.value ? h("div", { class: "cd2-trigger-message" }, message.value) : null,
           h("div", { class: "cd2-trigger-actions" }, [
             h("button", { class: "cd2-trigger-btn", disabled: loading.value, onClick: loadStatus }, loading.value ? "刷新中…" : "刷新状态"),
             h("button", { class: "cd2-trigger-btn primary", disabled: triggering.value, onClick: trigger }, triggering.value ? "触发中…" : "立即检查上传"),
+            h("button", { class: "cd2-trigger-btn", onClick: () => { showHelp.value = true; } }, "使用说明"),
+            h("button", { class: "cd2-trigger-btn", onClick: () => emit("switch") }, "设置"),
             h("button", { class: "cd2-trigger-btn", onClick: () => emit("close") }, "关闭"),
           ]),
         ]);

@@ -1,6 +1,6 @@
 # CD2 上传触发 115 STRM
 
-MoviePilot V2 插件：监听 CloudDrive2 上传任务完成事件，按配置的多个目录规则调用 115 网盘 STRM 助手生成增量 STRM。
+MoviePilot V2 插件：监听 CloudDrive2 新完成任务，按配置的多个目录规则调用 115 网盘 STRM 助手生成增量 STRM，并将字幕文件限速下载到本地。
 
 ## 项目结构
 
@@ -12,8 +12,12 @@ MoviePilot V2 插件：监听 CloudDrive2 上传任务完成事件，按配置�
 
 - 通过 CloudDrive2 `PushMessage` 接收上传任务变化
 - 通过 `GetUploadFileCount`、`GetUploadFileList` 轮询补偿断线期间的任务
-- 只处理状态为 `Finish` 且命中监控目录的媒体文件
-- 去重后批量调用 `P115StrmHelper/api_strm_sync_creata`
+- 启动后的第一次成功扫描只建立基线，不处理当前已经是 `Finish` 的任务
+- 后续只处理新变为 `Finish` 且命中监控目录的文件
+- 媒体文件去重后批量调用 `P115StrmHelper/api_strm_sync_creata`
+- `srt,ssa,ass,vtt,sub,idx` 等字幕由独立线程从 CD2 下载，按配置的最小间隔串行限速
+
+配置页内置“使用说明”，会解释 CD2 前缀、115 前缀、本地根目录，以及四个由 115 STRM 助手执行的附加动作。
 
 ## 发布到 GitHub 并由插件市场在线安装
 

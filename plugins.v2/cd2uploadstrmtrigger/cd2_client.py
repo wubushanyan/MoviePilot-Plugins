@@ -14,7 +14,7 @@ from clouddrive2_client.proto import clouddrive_pb2_grpc as cd2_pb2_grpc
 
 
 class CloudDrive2Client:
-    """封装 CloudDrive2 上传任务相关的 gRPC 调用。"""
+    """封装 CloudDrive2 上传任务和文件下载相关的 gRPC 调用。"""
 
     def __init__(self, endpoint: str, token: str, timeout: int = 15, page_size: int = 200):
         """创建 CloudDrive2 gRPC 客户端。"""
@@ -109,6 +109,26 @@ class CloudDrive2Client:
             if len(items) >= total:
                 break
         return items
+
+    def get_download_url_info(self, path: str) -> dict:
+        """获取指定 CD2 文件的下载地址及下载所需请求头。"""
+        result = self._stub.GetDownloadUrlPath(
+            cd2_pb2.GetDownloadUrlPathRequest(
+                path=str(path or ""),
+                preview=False,
+                lazy_read=False,
+                get_direct_url=True,
+            ),
+            metadata=self._metadata(),
+            timeout=self.timeout,
+        )
+        return {
+            "download_url_path": str(getattr(result, "downloadUrlPath", "") or ""),
+            "direct_url": str(getattr(result, "directUrl", "") or ""),
+            "user_agent": str(getattr(result, "userAgent", "") or ""),
+            "additional_headers": dict(getattr(result, "additionalHeaders", {}) or {}),
+            "expires_in": int(getattr(result, "expiresIn", 0) or 0),
+        }
 
     @staticmethod
     def _item_key(item: Any) -> str:
