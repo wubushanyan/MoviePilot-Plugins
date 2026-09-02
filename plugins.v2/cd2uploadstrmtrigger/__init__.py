@@ -30,8 +30,8 @@ class Cd2UploadStrmTrigger(_PluginBase):
     plugin_desc = "监听 CloudDrive2 上传完成任务，按目录映射调用 115 网盘 STRM 助手生成增量 STRM。"
     plugin_icon = "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png"
     plugin_version = "0.1.0"
-    plugin_author = "daimon3332"
-    author_url = "https://github.com/daimon3332"
+    plugin_author = "wubushanyan"
+    author_url = "https://github.com/wubushanyan"
     plugin_config_prefix = "cd2uploadstrmtrigger_"
     plugin_order = 98
     auth_level = 1

@@ -17,8 +17,9 @@ MoviePilot V2 插件：监听 CloudDrive2 上传任务完成事件，按配置�
 
 ## 发布到 GitHub 并由插件市场在线安装
 
-本仓库已经按 MoviePilot V2 的在线市场结构整理好。创建一个公开 GitHub 仓库（建议名称
-`cd2-upload-strm-trigger`），将本目录的 `main` 分支推送到仓库根目录即可。
+本仓库已经按 MoviePilot V2 的在线市场结构整理好。创建一个公开 GitHub 仓库
+`MoviePilot-Plugins`，将本目录的 `main` 分支推送到仓库根目录即可；后续插件继续放在同一个
+仓库中。
 
 MoviePilot V2 会读取仓库根目录的 `package.v2.json`，并从
 `plugins.v2/cd2uploadstrmtrigger/` 下载插件；当前索引未声明 `release: true`，因此不需要创建
@@ -27,7 +28,7 @@ GitHub Release。
 在 MP 中打开“插件 → 插件市场设置”，将仓库地址加入 `PLUGIN_MARKET`，例如：
 
 ```text
-https://github.com/daimon3332/cd2-upload-strm-trigger
+https://github.com/wubushanyan/MoviePilot-Plugins
 ```
 
 多个仓库用英文逗号分隔。首次切换到在线版本前，先移除本地插件仓库配置

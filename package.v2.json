@@ -5,7 +5,7 @@
     "labels": "网盘工具,STRM,CloudDrive2",
     "version": "0.1.0",
     "icon": "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png",
-    "author": "daimon3332",
+    "author": "wubushanyan",
     "level": 1,
     "system_version": ">=2.15.0",
     "history": {
