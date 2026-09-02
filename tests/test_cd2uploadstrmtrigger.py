@@ -157,6 +157,10 @@ def test_media_and_subtitle_refresh_requests_share_debounce_window():
     plugin._state_lock = threading.RLock()
     plugin._emby_refresh_lock = threading.RLock()
     plugin._emby_refresh_wake_event = threading.Event()
+    plugin._emby_refresh_pending = False
+    plugin._emby_refresh_deadline = 0.0
+    plugin._emby_refresh_pending_count = 0
+    plugin._emby_refresh_reasons = set()
     plugin._request_emby_refresh("strm", 2)
     plugin._request_emby_refresh("subtitle", 1)
     assert plugin._emby_refresh_pending is True
