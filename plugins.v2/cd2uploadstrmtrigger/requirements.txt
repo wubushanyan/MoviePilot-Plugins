@@ -1,0 +1,3 @@
+grpcio>=1.80.0
+protobuf>=6.31.1,<7
+clouddrive2-client==0.3.0

@@ -1,0 +1,15 @@
+{
+  "Cd2UploadStrmTrigger": {
+    "name": "CD2 上传触发 115 STRM",
+    "description": "监听 CloudDrive2 上传完成任务，按目录映射调用 115 网盘 STRM 助手生成增量 STRM。",
+    "labels": "网盘工具,STRM,CloudDrive2",
+    "version": "0.1.0",
+    "icon": "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png",
+    "author": "local",
+    "level": 1,
+    "system_version": ">=2.15.0",
+    "history": {
+      "v0.1.0": "初始版本：支持 CD2 上传状态监听、多目录映射、去重和 115 STRM API 精确增量生成。"
+    }
+  }
+}
