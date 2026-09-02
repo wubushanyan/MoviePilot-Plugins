@@ -57,9 +57,41 @@ def test_subtitle_is_mapped_to_local_path_without_strm_flags():
     )
     kind, payload = plugin._build_file_payload(subtitle)
     assert kind == "subtitle"
-    assert payload["cd2_path"] == "/CloudNAS/115/影视库/电影/a.srt"
+    assert payload["cd2_path"] == "/影视库/电影/a.srt"
+    assert payload["raw_dest_path"] == "/CloudNAS/115/影视库/电影/a.srt"
     assert payload["local_file"] == "/media/MP_movieDB/影视库/电影/a.srt"
     assert "scrape_metadata" not in payload
+
+
+def test_mount_source_and_api_paths_are_equivalent():
+    """验证挂载路径、源目录路径和令牌 API 路径可以命中同一条规则。"""
+    plugin = _make_plugin()
+    paths = (
+        "/CloudNAS/115/影视库/电影/a.sup",
+        "/115/影视库/电影/a.sup",
+        "/影视库/电影/a.sup",
+    )
+    for path in paths:
+        kind, payload = plugin._build_file_payload(
+            clouddrive_pb2.UploadFileInfo(destPath=path, size=12, statusEnum=5)
+        )
+        assert kind == "subtitle"
+        assert payload["pan_path"] == "/影视库/电影/a.sup"
+        assert payload["cd2_path"] == "/影视库/电影/a.sup"
+
+
+def test_remote_upload_operator_is_not_filtered():
+    """验证 RemoteUpload 完成任务不会被当作挂载上传以外的任务过滤。"""
+    plugin = _make_plugin()
+    task = clouddrive_pb2.UploadFileInfo(
+        key="remote-upload-1",
+        destPath="/影视库/电影/a.mkv",
+        size=123,
+        operatorType=clouddrive_pb2.UploadFileInfo.RemoteUpload,
+        statusEnum=clouddrive_pb2.UploadFileInfo.Finish,
+    )
+    payload = plugin._build_payload(task)
+    assert payload["pan_path"] == "/影视库/电影/a.mkv"
 
 
 def test_startup_baseline_option_is_removed():

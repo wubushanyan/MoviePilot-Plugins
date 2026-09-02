@@ -1,14 +1,15 @@
 {
   "Cd2UploadStrmTrigger": {
     "name": "CD2 上传触发 115 STRM",
-    "description": "监听 CloudDrive2 新完成任务，媒体生成 115 STRM，字幕按限速下载到本地。",
+    "description": "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体生成 115 STRM，字幕按限速下载到本地。",
     "labels": "网盘工具,STRM,字幕,CloudDrive2",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "icon": "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png",
     "author": "wubushanyan",
     "level": 1,
     "system_version": ">=2.15.0",
     "history": {
+      "v0.3.0": "增加 RemoteUpload 文件系统变更监听、上传推送快速补扫、CD2 多路径归一化、原始任务诊断日志和字幕上传稳定性确认。",
       "v0.2.0": "增加字幕文件下载与限速；启动固定建立基线且不处理已有完成任务；增加目录用途说明、状态页设置入口，并修复按钮文字颜色。",
       "v0.1.0": "初始版本：支持 CD2 上传状态监听、多目录映射、去重和 115 STRM API 精确增量生成。"
     }

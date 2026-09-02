@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 from threading import Event
 from typing import Any, Iterator, List
 from urllib.parse import urlparse
@@ -130,6 +131,22 @@ class CloudDrive2Client:
             "expires_in": int(getattr(result, "expiresIn", 0) or 0),
         }
 
+    def get_file_info(self, path: str) -> Any:
+        """读取单个文件的最新属性，用于确认远程上传已经稳定。"""
+        value = str(path or "").replace("\\", "/").strip()
+        if not value.startswith("/"):
+            value = "/" + value
+        value = posixpath.normpath(value)
+        name = posixpath.basename(value)
+        if not name or value == "/":
+            raise ValueError("CD2 文件路径无效")
+        parent = posixpath.dirname(value) or "/"
+        return self._stub.FindFileByPath(
+            cd2_pb2.FindFileByPathRequest(parentPath=parent, path=name),
+            metadata=self._metadata(),
+            timeout=self.timeout,
+        )
+
     @staticmethod
     def _item_key(item: Any) -> str:
         """提取上传任务列表项的去重键。"""
@@ -139,7 +156,7 @@ class CloudDrive2Client:
         return f"{getattr(item, 'destPath', '')}|{getattr(item, 'size', 0)}"
 
     def push_messages(self, stop_event: Event) -> Iterator[Any]:
-        """持续读取 CD2 PushMessage 中的上传状态变化。"""
+        """持续读取 CD2 PushMessage 中的上传和文件系统变化。"""
         call = self._stub.PushMessage(Empty(), metadata=self._metadata())
         for message in call:
             if stop_event.is_set():
