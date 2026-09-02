@@ -15,9 +15,35 @@ MoviePilot V2 插件：监听 CloudDrive2 上传任务完成事件，按配置�
 - 只处理状态为 `Finish` 且命中监控目录的媒体文件
 - 去重后批量调用 `P115StrmHelper/api_strm_sync_creata`
 
-## 部署说明
+## 发布到 GitHub 并由插件市场在线安装
 
-当前 MoviePilot 容器只挂载宿主机 `/media`，因此本目录是 Git 源码仓库；MP 使用的部署副本仍在：
+本仓库已经按 MoviePilot V2 的在线市场结构整理好。创建一个公开 GitHub 仓库（建议名称
+`cd2-upload-strm-trigger`），将本目录的 `main` 分支推送到仓库根目录即可。
+
+MoviePilot V2 会读取仓库根目录的 `package.v2.json`，并从
+`plugins.v2/cd2uploadstrmtrigger/` 下载插件；当前索引未声明 `release: true`，因此不需要创建
+GitHub Release。
+
+在 MP 中打开“插件 → 插件市场设置”，将仓库地址加入 `PLUGIN_MARKET`，例如：
+
+```text
+https://github.com/daimon3332/cd2-upload-strm-trigger
+```
+
+多个仓库用英文逗号分隔。首次切换到在线版本前，先移除本地插件仓库配置
+`/media/MP_movieDB/local-plugins`，再从市场安装或强制更新本插件；移除配置不会删除这个 Git
+仓库。
+
+后续更新时，同时修改下面两处版本号并提交推送到 `main`：
+
+- `package.v2.json` 中的 `version`
+- `plugins.v2/cd2uploadstrmtrigger/__init__.py` 中的 `plugin_version`
+
+然后在 MP 刷新插件市场，点击更新即可。
+
+## 本地部署说明
+
+当前 MoviePilot 容器只挂载宿主机 `/media`，因此本目录是 Git 源码仓库；MP 使用的本地部署副本仍在：
 
 ```text
 /media/MP_movieDB/local-plugins
