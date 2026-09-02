@@ -1,5 +1,8 @@
 """CD2 上传触发 115 STRM 插件的纯逻辑测试。"""
 
+import threading
+
+import cd2uploadstrmtrigger as plugin_module
 from cd2uploadstrmtrigger import Cd2UploadStrmTrigger
 from clouddrive2_client.proto import clouddrive_pb2
 
@@ -99,3 +102,50 @@ def test_startup_baseline_option_is_removed():
     plugin = _make_plugin()
     assert "baseline_on_start" not in plugin._config
     assert plugin._config["subtitle_interval"] == 3.0
+
+
+def test_115_payload_never_enables_assistant_media_refresh():
+    """验证刷新开关不会再传给 115 助手，避免其逐文件刷新。"""
+    plugin = _make_plugin()
+    plugin._config["media_server_refresh"] = True
+    task = clouddrive_pb2.UploadFileInfo(
+        destPath="/影视库/电影/a.mkv",
+        size=123,
+        statusEnum=clouddrive_pb2.UploadFileInfo.Finish,
+    )
+    payload = plugin._build_payload(task)
+    assert payload["media_server_refresh"] is False
+
+
+def test_emby_is_refreshed_once_for_one_strm_batch(monkeypatch):
+    """验证一批 STRM 只向一个已配置 Emby 发送一次刷新请求。"""
+    plugin = _make_plugin()
+    plugin._config["media_server_refresh"] = True
+    plugin._stats = plugin._new_stats()
+    plugin._state_lock = threading.RLock()
+
+    class FakeEmby:
+        def __init__(self):
+            self.calls = 0
+
+        def is_inactive(self):
+            return False
+
+        def refresh_root_library(self):
+            self.calls += 1
+            return True
+
+    fake_emby = FakeEmby()
+
+    class FakeHelper:
+        def get_services(self, type_filter=None):
+            assert type_filter == "emby"
+            return {"家庭 Emby": type("Service", (), {"instance": fake_emby})()}
+
+    monkeypatch.setattr(plugin_module, "MediaServerHelper", FakeHelper)
+    plugin._refresh_emby_batch(
+        [{"pan_path": "/影视库/电影/a.mkv"}, {"pan_path": "/影视库/电影/b.mkv"}]
+    )
+    assert fake_emby.calls == 1
+    assert plugin._stats["emby_refresh_batch_count"] == 1
+    assert plugin._stats["emby_refresh_request_count"] == 1

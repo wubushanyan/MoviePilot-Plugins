@@ -14,10 +14,10 @@ MoviePilot V2 插件：监听 CloudDrive2 新完成任务，按配置的多个�
 - 通过 `GetUploadFileCount`、`GetUploadFileList` 轮询补偿断线期间的任务
 - 启动后的第一次成功扫描只建立基线，不处理当前已经是 `Finish` 的任务
 - 后续只处理新变为 `Finish` 且命中监控目录的文件
-- 媒体文件去重后批量调用 `P115StrmHelper/api_strm_sync_creata`
+- 媒体文件去重后批量调用 `P115StrmHelper/api_strm_sync_creata`；如果开启 Emby 刷新，则每批 STRM 生成完成后由本插件向每个已配置的 Emby 服务发送一次刷新 API 请求
 - `srt,ssa,ass,vtt,sub,idx,sup` 等字幕由独立线程从 CD2 下载，按配置的最小间隔串行限速，并在下载前确认文件大小稳定
 
-配置页内置“使用说明”，会解释 CD2 前缀、115 前缀、本地根目录，以及四个由 115 STRM 助手执行的附加动作。
+配置页内置“使用说明”，会解释 CD2 前缀、115 前缀、本地根目录，以及 115 STRM 助手和本插件分别执行的附加动作。
 
 ## 发布到 GitHub 并由插件市场在线安装
 

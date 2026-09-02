@@ -16,6 +16,7 @@ from fastapi import Body
 from app import schemas
 from app.core.config import settings
 from app.core.event import Event, eventmanager
+from app.helper.mediaserver import MediaServerHelper
 from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import EventType, NotificationType
@@ -28,9 +29,9 @@ class Cd2UploadStrmTrigger(_PluginBase):
     """监听 CD2 上传完成任务并调用 115 STRM 助手生成精确增量 STRM。"""
 
     plugin_name = "CD2 上传触发 115 STRM"
-    plugin_desc = "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体调用 115 网盘 STRM 助手生成增量 STRM，字幕按限速下载到本地。"
+    plugin_desc = "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体调用 115 网盘 STRM 助手生成增量 STRM，字幕按限速下载到本地，并可按批次刷新 Emby。"
     plugin_icon = "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png"
-    plugin_version = "0.3.0"
+    plugin_version = "0.4.0"
     plugin_author = "wubushanyan"
     author_url = "https://github.com/wubushanyan"
     plugin_config_prefix = "cd2uploadstrmtrigger_"
@@ -129,6 +130,11 @@ class Cd2UploadStrmTrigger(_PluginBase):
             "filesystem_event_count": 0,
             "rapid_rescan_count": 0,
             "ignored_count": 0,
+            "emby_refresh_batch_count": 0,
+            "emby_refresh_request_count": 0,
+            "last_emby_refresh_at": "",
+            "last_emby_refresh_servers": [],
+            "last_emby_refresh_error": "",
             "last_subtitle_at": "",
             "last_subtitle_file": "",
             "last_subtitle_error": "",
@@ -1011,7 +1017,9 @@ class Cd2UploadStrmTrigger(_PluginBase):
             common_payload.update(
                 {
                     "scrape_metadata": bool(self._config["scrape_metadata"]),
-                    "media_server_refresh": bool(self._config["media_server_refresh"]),
+                    # Emby 刷新由本插件在整批 STRM 生成完成后统一执行。
+                    # 显式传 False，避免 115 助手的全局 API 刷新开关再次逐文件刷新。
+                    "media_server_refresh": False,
                     "auto_download_mediainfo": bool(self._config["auto_download_mediainfo"]),
                 }
             )
@@ -1242,7 +1250,95 @@ class Cd2UploadStrmTrigger(_PluginBase):
                             item["payload"].get("pan_path", key),
                         )
             self._update_pending_count()
+        succeeded_payloads = [
+            selected_by_key[key]["payload"]
+            for key in succeeded
+            if key in selected_by_key
+        ]
+        if succeeded_payloads:
+            self._refresh_emby_batch(succeeded_payloads)
         self._record_trigger_result(result, len(succeeded), len(failed))
+
+    def _refresh_emby_batch(self, payloads: List[Dict[str, Any]]) -> None:
+        """在一批 STRM 生成成功后向每个已配置的 Emby 发送一次刷新请求。"""
+        if not self._config.get("media_server_refresh") or not payloads:
+            return
+
+        try:
+            services = MediaServerHelper().get_services(type_filter="emby")
+        except Exception as exc:
+            message = f"获取 MoviePilot Emby 服务失败：{exc}"
+            with self._state_lock:
+                self._stats["last_emby_refresh_error"] = message
+            logger.warning("【CD2 STRM触发器】%s", message)
+            return
+
+        if not services:
+            message = "MoviePilot 未找到已配置的 Emby 服务，跳过批次刷新"
+            with self._state_lock:
+                self._stats["last_emby_refresh_error"] = message
+            logger.warning("【CD2 STRM触发器】%s", message)
+            return
+
+        server_names = list(services.keys())
+        logger.info(
+            "【CD2 STRM触发器】开始 Emby 批次刷新：STRM成功=%s，目标服务器=%s；每个服务器本批仅请求一次",
+            len(payloads),
+            ",".join(server_names),
+        )
+        refreshed_servers: List[str] = []
+        errors: List[str] = []
+        request_count = 0
+        for name, service in services.items():
+            instance = getattr(service, "instance", None)
+            if not instance:
+                errors.append(f"{name}:实例不存在")
+                continue
+            try:
+                if instance.is_inactive():
+                    errors.append(f"{name}:服务未连接")
+                    continue
+                refresh = getattr(instance, "refresh_root_library", None)
+                if not callable(refresh):
+                    errors.append(f"{name}:不支持 Emby 刷新接口")
+                    continue
+                request_count += 1
+                if refresh():
+                    refreshed_servers.append(name)
+                    logger.info(
+                        "【CD2 STRM触发器】Emby 批次刷新请求已发送：server=%s，文件数=%s",
+                        name,
+                        len(payloads),
+                    )
+                else:
+                    errors.append(f"{name}:Emby API 返回失败")
+                    logger.warning(
+                        "【CD2 STRM触发器】Emby 批次刷新失败：server=%s，文件数=%s",
+                        name,
+                        len(payloads),
+                    )
+            except Exception as exc:
+                errors.append(f"{name}:{exc}")
+                logger.warning("【CD2 STRM触发器】Emby 批次刷新异常：server=%s，原因=%s", name, exc)
+
+        with self._state_lock:
+            self._stats["emby_refresh_batch_count"] += 1
+            self._stats["emby_refresh_request_count"] += request_count
+            self._stats["last_emby_refresh_at"] = self._now()
+            self._stats["last_emby_refresh_servers"] = refreshed_servers
+            self._stats["last_emby_refresh_error"] = "; ".join(errors)
+        if errors:
+            logger.warning(
+                "【CD2 STRM触发器】Emby 批次刷新部分失败：成功=%s，失败=%s",
+                ",".join(refreshed_servers) or "无",
+                "; ".join(errors),
+            )
+        else:
+            logger.info(
+                "【CD2 STRM触发器】Emby 批次刷新完成：本批文件=%s，API请求=%s",
+                len(payloads),
+                request_count,
+            )
 
     def _call_p115_api(self, payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
         """调用 115 STRM 助手的文件级增量生成 API。"""
