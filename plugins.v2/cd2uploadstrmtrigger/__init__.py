@@ -32,7 +32,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
     plugin_name = "CD2 上传触发 115 STRM"
     plugin_desc = "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体调用 115 网盘 STRM 助手生成增量 STRM，字幕按限速下载到本地，并可批量刷新 Emby、同步删除。"
     plugin_icon = "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png"
-    plugin_version = "0.8.0"
+    plugin_version = "0.8.3"
     plugin_author = "wubushanyan"
     author_url = "https://github.com/wubushanyan"
     plugin_config_prefix = "cd2uploadstrmtrigger_"
@@ -289,7 +289,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
             return None
         return {
             "name": cls._text(rule.get("name")),
-            "enabled": bool(rule.get("enabled", True)),
+            "enabled": cls._bool(rule.get("enabled", True), True),
             "cd2_prefix": cd2_prefix,
             "pan_prefix": pan_prefix,
             "local_path": local_path.rstrip("/") or "/",
@@ -380,6 +380,256 @@ class Cd2UploadStrmTrigger(_PluginBase):
         }
         return normalized
 
+    @staticmethod
+    def _valid_service_url(value: Any) -> bool:
+        """检查服务地址是否至少包含可解析的 HTTP(S) 主机名。"""
+        text = str(value or "").strip()
+        if not text or any(character.isspace() for character in text):
+            return False
+        candidate = text if "://" in text else f"http://{text}"
+        try:
+            parsed = urlparse(candidate)
+            # 访问 port 可触发 ValueError，需一并纳入格式校验。
+            hostname = parsed.hostname
+            parsed.port
+        except ValueError:
+            return False
+        return parsed.scheme.lower() in {"http", "https"} and bool(hostname)
+
+    @classmethod
+    def _valid_local_mapping(cls, value: Any) -> bool:
+        """检查本地映射是否为安全的绝对目录路径。"""
+        text = cls._text(value)
+        if not text:
+            return False
+        try:
+            path = Path(text).expanduser()
+        except (TypeError, ValueError, OSError):
+            return False
+        # 根目录不能作为删除同步的边界，也容易造成误删风险。
+        return path.is_absolute() and path != Path("/") and ".." not in path.parts
+
+    @classmethod
+    def _raw_rules(cls, raw: Dict[str, Any]) -> List[Any]:
+        """读取原始规则列表，便于区分被静默过滤的无效启用规则。"""
+        rules_value = raw.get("rules")
+        if rules_value is None:
+            rules_value = raw.get("monitor_rules") or []
+        if isinstance(rules_value, dict):
+            return list(rules_value.values())
+        if isinstance(rules_value, (list, tuple, set)):
+            return list(rules_value)
+        return []
+
+    @classmethod
+    def _usable_emby_service_names(cls, services: Any) -> List[str]:
+        """返回拥有可用实例和刷新方法的 Emby 服务名，不执行刷新请求。"""
+        if isinstance(services, dict):
+            items = services.items()
+        elif isinstance(services, (list, tuple)):
+            items = ((str(index + 1), service) for index, service in enumerate(services))
+        else:
+            return []
+
+        usable: List[str] = []
+        for name, service in items:
+            instance = getattr(service, "instance", None)
+            refresh = getattr(instance, "refresh_root_library", None) if instance else None
+            if instance is None or not callable(refresh):
+                continue
+            is_inactive = getattr(instance, "is_inactive", None)
+            if callable(is_inactive):
+                try:
+                    if is_inactive():
+                        continue
+                except Exception:
+                    continue
+            usable.append(cls._text(name) or "Emby")
+        return usable
+
+    def _validate_config(
+        self, config: Optional[dict] = None, *, check_services: bool = True
+    ) -> Dict[str, Any]:
+        """执行不泄漏凭据的配置前置校验，并返回字段和页签定位信息。"""
+        raw = config if isinstance(config, dict) else getattr(self, "_config", {})
+        normalized = self._normalize_config(raw)
+        errors: List[Dict[str, Any]] = []
+        warnings: List[Dict[str, Any]] = []
+        seen_errors: set[Tuple[str, str, str]] = set()
+
+        def add_error(
+            field: str,
+            tab: str,
+            message: str,
+            *,
+            feature: Optional[str] = None,
+            scope: str = "core",
+        ) -> None:
+            key = (field, message, feature or scope)
+            if key in seen_errors:
+                return
+            seen_errors.add(key)
+            item: Dict[str, Any] = {
+                "field": field,
+                "tab": tab,
+                "message": message,
+                "scope": scope,
+            }
+            if feature:
+                item["feature"] = feature
+            errors.append(item)
+
+        enabled = bool(normalized.get("enabled"))
+        poll_enabled = bool(normalized.get("poll_fallback_enabled"))
+        delete_enabled = bool(normalized.get("delete_sync"))
+        helper_actions = any(
+            bool(normalized.get(key))
+            for key in ("scrape_metadata", "auto_download_mediainfo")
+        )
+
+        raw_endpoint = raw.get("cd2_endpoint") if "cd2_endpoint" in raw else normalized["cd2_endpoint"]
+        raw_moviepilot_url = (
+            raw.get("moviepilot_url")
+            if "moviepilot_url" in raw
+            else normalized["moviepilot_url"]
+        )
+        needs_cd2 = enabled or poll_enabled
+        if needs_cd2:
+            scope = "core" if enabled else "feature"
+            feature = None if enabled else "poll_fallback_enabled"
+            if not self._text(raw_endpoint) or not self._valid_service_url(normalized["cd2_endpoint"]):
+                add_error(
+                    "cd2_endpoint",
+                    "connection",
+                    "CD2 gRPC 地址无效，请填写可访问的 HTTP(S) 地址",
+                    feature=feature,
+                    scope=scope,
+                )
+            if not normalized["cd2_token"]:
+                add_error(
+                    "cd2_token",
+                    "connection",
+                    "CD2 API Token 未填写",
+                    feature=feature,
+                    scope=scope,
+                )
+
+        raw_rules = self._raw_rules(raw)
+        invalid_enabled_rule = False
+        for rule in raw_rules:
+            if not isinstance(rule, dict):
+                invalid_enabled_rule = True
+                continue
+            rule_enabled = self._bool(rule.get("enabled", True), True)
+            if rule_enabled and self._normalize_rule(rule) is None:
+                invalid_enabled_rule = True
+
+        valid_enabled_rules = [
+            rule
+            for rule in normalized.get("rules", [])
+            if rule.get("enabled", True) and self._valid_local_mapping(rule.get("local_path"))
+        ]
+        if enabled and (invalid_enabled_rule or not valid_enabled_rules):
+            add_error(
+                "rules",
+                "rules",
+                "至少需要一条有效且已启用的目录映射规则",
+                scope="core",
+            )
+        if delete_enabled and not valid_enabled_rules:
+            add_error(
+                "delete_sync",
+                "actions",
+                "删除同步需要至少一条有效的本地映射",
+                feature="delete_sync",
+                scope="feature",
+            )
+
+        needs_moviepilot = enabled or helper_actions
+        if needs_moviepilot:
+            scope = "core" if enabled else "feature"
+            feature = None if enabled else "moviepilot_actions"
+            if not self._text(raw_moviepilot_url) or not self._valid_service_url(
+                normalized["moviepilot_url"]
+            ):
+                add_error(
+                    "moviepilot_url",
+                    "connection",
+                    "MoviePilot 地址无效，请填写可访问的 HTTP(S) 地址",
+                    feature=feature,
+                    scope=scope,
+                )
+            has_moviepilot_credential = bool(
+                normalized["moviepilot_api_key"]
+                or self._text(getattr(settings, "API_TOKEN", ""))
+            )
+            if not has_moviepilot_credential:
+                add_error(
+                    "moviepilot_api_key",
+                    "connection",
+                    "未找到 MoviePilot API 凭据，请填写 API Key 或配置系统 API_TOKEN",
+                    feature=feature,
+                    scope=scope,
+                )
+        # moviepilot_api_key 不要求用户字段必填：系统 API_TOKEN 可作为回退凭据。
+
+        media_refresh_enabled = bool(normalized.get("media_server_refresh"))
+        if media_refresh_enabled:
+            usable_emby: List[str] = []
+            if check_services:
+                try:
+                    services = MediaServerHelper().get_services(type_filter="emby")
+                    usable_emby = self._usable_emby_service_names(services)
+                except Exception:
+                    services = None
+            if not usable_emby:
+                add_error(
+                    "media_server_refresh",
+                    "actions",
+                    "未找到可用的 Emby 服务，请先配置并连接 Emby",
+                    feature="media_server_refresh",
+                    scope="feature",
+                )
+
+        feature_status = {
+            "poll_fallback_enabled": {"enabled": poll_enabled},
+            "delete_sync": {"enabled": delete_enabled},
+            "media_server_refresh": {"enabled": media_refresh_enabled},
+            "moviepilot_actions": {"enabled": helper_actions},
+        }
+        feature_errors: Dict[str, List[Dict[str, Any]]] = {}
+        for error in errors:
+            feature = error.get("feature")
+            if feature:
+                feature_errors.setdefault(feature, []).append(error)
+        for feature, feature_error_list in feature_errors.items():
+            feature_status.setdefault(feature, {})["valid"] = False
+            feature_status[feature]["errors"] = feature_error_list
+        for feature, state in feature_status.items():
+            state.setdefault("valid", True)
+
+        core_valid = not any(error.get("scope") == "core" for error in errors)
+        valid = not errors
+        if valid:
+            message = "配置校验通过"
+        else:
+            message = "配置校验失败：" + "；".join(
+                str(error["message"]) for error in errors[:3]
+            )
+        return {
+            "valid": valid,
+            "core_valid": core_valid,
+            "errors": errors,
+            "warnings": warnings,
+            "features": feature_status,
+            "feature_errors": feature_errors,
+            "message": message,
+        }
+
+    def validate_config(self, config: Optional[dict] = None) -> Dict[str, Any]:
+        """提供给测试和宿主调用的配置校验入口。"""
+        return self._validate_config(config)
+
     def _public_config(self) -> Dict[str, Any]:
         """返回前端编辑所需的配置快照。"""
         return {
@@ -391,7 +641,8 @@ class Cd2UploadStrmTrigger(_PluginBase):
     def init_plugin(self, config: dict = None):
         """根据配置启动或停止 CD2 监听服务。"""
         self.stop_service()
-        self._config = self._normalize_config(config or {})
+        raw_config = config if isinstance(config, dict) else {}
+        self._config = self._normalize_config(raw_config)
         self._task_states = {}
         self._pending = {}
         self._subtitle_pending = {}
@@ -422,14 +673,71 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._stats["poll_fallback_enabled"] = bool(
             self._config.get("poll_fallback_enabled")
         )
+
+        validation = self._validate_config(raw_config)
+        feature_errors = validation.get("feature_errors") or {}
+        for feature in feature_errors:
+            if feature == "media_server_refresh":
+                self._config["media_server_refresh"] = False
+            elif feature == "delete_sync":
+                self._config["delete_sync"] = False
+            elif feature == "poll_fallback_enabled":
+                self._config["poll_fallback_enabled"] = False
+            elif feature == "moviepilot_actions":
+                self._config["scrape_metadata"] = False
+                self._config["auto_download_mediainfo"] = False
+
+        # 核心 MoviePilot 配置无效时插件不会启动，同时关闭依赖该配置的助手动作。
+        if not validation["core_valid"] and any(
+            error.get("field") in {"moviepilot_url", "moviepilot_api_key"}
+            for error in validation["errors"]
+        ):
+            self._config["scrape_metadata"] = False
+            self._config["auto_download_mediainfo"] = False
+        core_fields = {
+            error.get("field")
+            for error in validation["errors"]
+            if error.get("scope") == "core"
+        }
+        if core_fields & {"cd2_endpoint", "cd2_token"}:
+            self._config["poll_fallback_enabled"] = False
+            self._config["delete_sync"] = False
+
+        self._stats["poll_fallback_enabled"] = bool(
+            self._config.get("poll_fallback_enabled")
+        )
+
+        if not validation["core_valid"] and self._config["enabled"]:
+            self._config["enabled"] = False
+            messages = [
+                str(error["message"])
+                for error in validation["errors"]
+                if error.get("scope") == "core"
+            ]
+            self._set_error(
+                "配置校验失败，插件未启动：" + "；".join(messages[:3])
+            )
+            return
         if not self._config["enabled"]:
+            if feature_errors:
+                messages = [
+                    str(error["message"])
+                    for error in validation["errors"]
+                    if error.get("scope") == "feature"
+                ]
+                self._set_error(
+                    "可选功能前置校验失败，已关闭：" + "；".join(messages[:3])
+                )
             return
-        if not self._config["cd2_token"]:
-            self._set_error("未配置 CD2 API Token")
-            return
-        if not self._config["rules"]:
-            self._set_error("未配置有效的目录映射规则")
-            return
+        if feature_errors:
+            messages = [
+                str(error["message"])
+                for error in validation["errors"]
+                if error.get("scope") == "feature"
+            ]
+            self._set_error(
+                "可选功能前置校验失败，已关闭：" + "；".join(messages[:3])
+            )
         self._start_workers()
 
     def get_state(self) -> bool:
@@ -480,6 +788,13 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 "summary": "测试 CD2 连接和上传任务权限",
             },
             {
+                "path": "/validate",
+                "endpoint": self.api_validate,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "校验 CD2 STRM 配置及可选功能前置条件",
+            },
+            {
                 "path": "/trigger",
                 "endpoint": self.api_trigger,
                 "methods": ["POST"],
@@ -527,6 +842,15 @@ class Cd2UploadStrmTrigger(_PluginBase):
         except Exception as exc:
             logger.warning("【CD2 STRM触发器】【CD2事件】连接测试失败：%s", exc)
             return schemas.Response(success=False, message=f"连接测试失败：{exc}")
+
+    def api_validate(self, config: Optional[dict] = Body(default=None)) -> schemas.Response:
+        """返回前端启用开关和保存前使用的脱敏配置校验结果。"""
+        validation = self._validate_config(config if isinstance(config, dict) else self._config)
+        return schemas.Response(
+            success=bool(validation["valid"]),
+            message=validation["message"],
+            data=validation,
+        )
 
     def api_trigger(self) -> schemas.Response:
         """请求后台立即执行一次上传任务检查。"""

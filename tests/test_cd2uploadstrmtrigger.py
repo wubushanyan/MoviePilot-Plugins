@@ -1,6 +1,9 @@
 """CD2 上传触发 115 STRM 插件的纯逻辑测试。"""
 
 import threading
+from pathlib import Path
+
+import pytest
 
 import cd2uploadstrmtrigger as plugin_module
 from cd2uploadstrmtrigger import Cd2UploadStrmTrigger
@@ -33,6 +36,44 @@ def _prepare_runtime(plugin, ready=True):
     plugin._ready_event = threading.Event()
     if ready:
         plugin._ready_event.set()
+    return plugin
+
+
+def _valid_config(**overrides):
+    """返回不触发外部请求的有效配置样本。"""
+    config = {
+        "enabled": True,
+        "cd2_endpoint": "http://cd2.test:19798",
+        "cd2_token": "cd2-test-token",
+        "moviepilot_url": "http://moviepilot.test:3001",
+        "moviepilot_api_key": "",
+        "rules": [
+            {
+                "enabled": True,
+                "cd2_prefix": "/影视库",
+                "pan_prefix": "/影视库",
+                "local_path": "/media/MP_movieDB/影视库",
+            }
+        ],
+    }
+    config.update(overrides)
+    return config
+
+
+def _init_test_plugin():
+    """创建可运行 init_plugin 但不会启动线程的测试对象。"""
+    plugin = _make_plugin()
+    plugin._ensure_runtime_events()
+    plugin._threads = []
+    plugin._push_client = None
+    plugin._emby_refresh_lock = threading.RLock()
+    plugin._emby_refresh_wake_event = threading.Event()
+    plugin._emby_refresh_pending = False
+    plugin._emby_refresh_deadline = 0.0
+    plugin._emby_refresh_pending_count = 0
+    plugin._emby_refresh_reasons = set()
+    plugin.get_data = lambda key: []
+    plugin._start_workers = lambda: pytest.fail("无效配置不应启动后台线程")
     return plugin
 
 
@@ -388,3 +429,213 @@ def test_event_history_is_categorized_bounded_and_redacted():
     assert required <= set(history[-1])
     assert history[-1]["category"] == "generate_event"
     assert "cd2-secret-token" not in str(history)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cd2_endpoint", ""),
+        ("cd2_token", ""),
+        ("rules", [{"enabled": True, "cd2_prefix": "/影视库"}]),
+    ],
+)
+def test_validate_core_configuration_requires_cd2_and_enabled_rule(
+    monkeypatch, field, value
+):
+    """核心启用配置必须有 CD2 地址、Token 和有效启用规则。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "system-test-token", raising=False)
+    plugin = _make_plugin()
+    config = _valid_config(**{field: value})
+
+    result = plugin._validate_config(config)
+
+    assert result["valid"] is False
+    assert any(error["field"] == field for error in result["errors"])
+    assert "cd2-test-token" not in str(result)
+    assert "system-test-token" not in str(result)
+
+
+def test_validate_accepts_empty_config_api_key_with_system_token(monkeypatch):
+    """配置 API Key 留空时可使用系统 API_TOKEN。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "system-test-token", raising=False)
+    plugin = _make_plugin()
+
+    result = plugin._validate_config(_valid_config(moviepilot_api_key=""))
+
+    assert result["valid"] is True
+    assert result["errors"] == []
+    assert "system-test-token" not in str(result)
+
+
+def test_validate_accepts_configured_moviepilot_api_key_without_system_token(monkeypatch):
+    """配置 API Key 时即使系统 API_TOKEN 为空也可以通过校验。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "", raising=False)
+    plugin = _make_plugin()
+    configured_key = "configured-moviepilot-key"
+
+    result = plugin._validate_config(_valid_config(moviepilot_api_key=configured_key))
+
+    assert result["valid"] is True
+    assert configured_key not in str(result)
+
+
+def test_validate_rejects_missing_moviepilot_credentials_without_leaking_token(monkeypatch):
+    """配置 API Key 和系统 API_TOKEN 均为空时必须明确报错。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "", raising=False)
+    plugin = _make_plugin()
+
+    result = plugin._validate_config(_valid_config(moviepilot_api_key=""))
+
+    assert result["valid"] is False
+    assert any(error["field"] == "moviepilot_api_key" for error in result["errors"])
+    assert "cd2-test-token" not in str(result)
+
+
+def test_validate_moviepilot_actions_require_credentials_when_plugin_is_disabled(
+    monkeypatch,
+):
+    """关闭插件时开启 115 助手动作仍需有效的 MoviePilot 凭据。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "", raising=False)
+    plugin = _make_plugin()
+
+    result = plugin._validate_config(
+        _valid_config(
+            enabled=False,
+            scrape_metadata=True,
+            auto_download_mediainfo=True,
+            moviepilot_api_key="",
+        )
+    )
+
+    assert result["valid"] is False
+    assert result["feature_errors"]["moviepilot_actions"]
+    assert all(error.get("scope") == "feature" for error in result["errors"])
+    assert "cd2-test-token" not in str(result)
+
+
+def test_validate_emby_refresh_requires_a_usable_service(monkeypatch):
+    """Emby 刷新必须有可用服务，且只检查服务能力不发送刷新请求。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "system-test-token", raising=False)
+    plugin = _make_plugin()
+
+    class EmptyHelper:
+        def get_services(self, type_filter=None):
+            assert type_filter == "emby"
+            return {}
+
+    monkeypatch.setattr(plugin_module, "MediaServerHelper", EmptyHelper)
+    rejected = plugin._validate_config(_valid_config(media_server_refresh=True))
+    assert rejected["valid"] is False
+    assert rejected["feature_errors"]["media_server_refresh"]
+
+    class FakeEmby:
+        def is_inactive(self):
+            return False
+
+        def refresh_root_library(self):
+            raise AssertionError("前置校验不应发送刷新请求")
+
+    class AvailableHelper:
+        def get_services(self, type_filter=None):
+            assert type_filter == "emby"
+            return {"家庭 Emby": type("Service", (), {"instance": FakeEmby()})()}
+
+    monkeypatch.setattr(plugin_module, "MediaServerHelper", AvailableHelper)
+    accepted = plugin._validate_config(_valid_config(media_server_refresh=True))
+    assert accepted["valid"] is True
+    assert accepted["features"]["media_server_refresh"]["valid"] is True
+
+
+def test_validate_delete_sync_requires_valid_local_mapping(monkeypatch):
+    """删除同步没有有效本地映射时不能开启。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "", raising=False)
+    plugin = _make_plugin()
+
+    result = plugin._validate_config(
+        _valid_config(
+            enabled=False,
+            delete_sync=True,
+            rules=[
+                {
+                    "enabled": True,
+                    "cd2_prefix": "/影视库",
+                    "pan_prefix": "/影视库",
+                    "local_path": "relative/path",
+                }
+            ],
+        )
+    )
+
+    assert result["valid"] is False
+    assert result["feature_errors"]["delete_sync"]
+    assert any(error["field"] == "delete_sync" for error in result["errors"])
+
+
+def test_init_plugin_rejects_invalid_core_without_starting(monkeypatch):
+    """初始化遇到无效核心配置时关闭插件并留下脱敏错误。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "system-test-token", raising=False)
+    plugin = _init_test_plugin()
+    secret = "cd2-init-secret-token"
+
+    plugin.init_plugin(
+        _valid_config(
+            enabled=True,
+            cd2_endpoint="",
+            cd2_token=secret,
+            rules=[],
+        )
+    )
+
+    assert plugin._config["enabled"] is False
+    assert plugin._stats["running"] is False
+    assert "CD2 gRPC 地址无效" in plugin._stats["last_error"]
+    assert secret not in plugin._stats["last_error"]
+    assert secret not in str(plugin._status_snapshot())
+
+
+def test_init_plugin_closes_invalid_optional_features_and_syncs_poll_status(
+    monkeypatch,
+):
+    """初始化会关闭缺少前置的可选功能，并同步轮询状态统计。"""
+    monkeypatch.setattr(plugin_module.settings, "API_TOKEN", "", raising=False)
+
+    class EmptyHelper:
+        def get_services(self, type_filter=None):
+            assert type_filter == "emby"
+            return {}
+
+    monkeypatch.setattr(plugin_module, "MediaServerHelper", EmptyHelper)
+    plugin = _init_test_plugin()
+    plugin.init_plugin(
+        {
+            "enabled": False,
+            "poll_fallback_enabled": True,
+            "delete_sync": True,
+            "media_server_refresh": True,
+            "scrape_metadata": True,
+            "auto_download_mediainfo": True,
+        }
+    )
+
+    assert plugin._config["poll_fallback_enabled"] is False
+    assert plugin._config["delete_sync"] is False
+    assert plugin._config["media_server_refresh"] is False
+    assert plugin._config["scrape_metadata"] is False
+    assert plugin._config["auto_download_mediainfo"] is False
+    assert plugin._stats["poll_fallback_enabled"] is False
+    assert plugin._stats["last_error"]
+
+
+def test_status_usage_tab_has_only_local_back_action():
+    """状态页说明子页只保留返回总览，不重复显示全局 footer 动作。"""
+    remote = (
+        Path(__file__).parents[1]
+        / "plugins.v2/cd2uploadstrmtrigger/dist/assets/remoteEntry.js"
+    ).read_text(encoding="utf-8")
+    page = remote.split("async function createPageModule()", 1)[1]
+
+    assert 'createUsageView(h, () => { activeTab.value = "overview"; })' in page
+    assert 'activeTab.value !== "usage"\n          ? h("div", { class: "cd2-trigger-actions cd2-trigger-footer" }' in page
+    assert 'button("使用说明"' not in page
+    assert page.count('button("设置"') == 1
+    assert page.count('button("关闭"') == 1

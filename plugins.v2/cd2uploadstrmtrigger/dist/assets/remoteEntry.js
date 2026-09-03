@@ -49,14 +49,14 @@ function injectStyle() {
     .cd2-trigger-title{font-size:18px;font-weight:650;margin-bottom:3px}.cd2-trigger-subtitle{font-size:12px;opacity:.72;margin-bottom:10px}
     .cd2-trigger-card{box-sizing:border-box;border:1px solid rgba(127,127,127,.27);border-radius:9px;padding:11px;margin-bottom:9px;background:rgba(127,127,127,.045)}
     .cd2-trigger-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px}.cd2-trigger-card-head strong{font-size:14px}.cd2-trigger-card-head small{display:block;opacity:.68;font-weight:400;margin-top:2px}
-    .cd2-trigger-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:9px}.cd2-trigger-card-wide{grid-column:1/-1}
-    .cd2-trigger-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px}.cd2-trigger-grid-wide{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+    .cd2-trigger-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:9px;min-width:0}.cd2-trigger-card-wide{grid-column:1/-1}
+    .cd2-trigger-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:9px;min-width:0}.cd2-trigger-grid-wide{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}
     .cd2-trigger-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px}.cd2-trigger-field input,.cd2-trigger-field textarea{box-sizing:border-box;width:100%;min-width:0;border:1px solid rgba(127,127,127,.42);border-radius:6px;padding:7px 8px;background:transparent;color:inherit;font:inherit;line-height:1.35}.cd2-trigger-field input:focus,.cd2-trigger-field textarea:focus{outline:2px solid rgba(33,150,243,.42);outline-offset:1px}.cd2-trigger-field textarea{min-height:68px;resize:vertical}
     .cd2-trigger-check{display:flex;gap:7px;align-items:flex-start;margin:7px 0;font-size:13px;line-height:1.4}.cd2-trigger-check input{flex:0 0 auto;margin-top:3px}
     .cd2-trigger-actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center;justify-content:flex-end}.cd2-trigger-footer{position:sticky;bottom:0;z-index:2;padding:9px 0 1px;background:var(--v-theme-background,rgba(20,20,20,.96))}
     .cd2-trigger-btn,.cd2-trigger-btn:visited,.cd2-trigger-btn:hover,.cd2-trigger-btn:active,.cd2-trigger-btn:focus,.cd2-trigger-config button,.cd2-trigger-page button{appearance:none;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:7px 11px;cursor:pointer;background:#424242;font:inherit;line-height:1.25;text-decoration:none;color:#fff !important;-webkit-text-fill-color:#fff !important;text-shadow:none}.cd2-trigger-config button *,.cd2-trigger-page button *{color:#fff !important;-webkit-text-fill-color:#fff !important}.cd2-trigger-btn.primary{background:#1976d2}.cd2-trigger-btn.danger{background:#b3261e}.cd2-trigger-btn.subtle{background:#5d5d5d}.cd2-trigger-btn.small{padding:5px 8px;font-size:12px}.cd2-trigger-btn:disabled{opacity:.52;cursor:default}.cd2-trigger-btn:hover:not(:disabled){filter:brightness(1.12)}
     .cd2-trigger-tabs{display:flex;gap:6px;overflow-x:auto;padding:1px 0 8px;margin-bottom:1px}.cd2-trigger-tab{flex:0 0 auto;white-space:nowrap;background:#3b3b3b}.cd2-trigger-tab.active{background:#1976d2;border-color:rgba(255,255,255,.3)}
-    .cd2-trigger-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:5px 0}.cd2-trigger-muted{opacity:.68}.cd2-trigger-hint,.cd2-trigger-note{font-size:12px;opacity:.78;line-height:1.58;margin-top:7px}.cd2-trigger-note{box-sizing:border-box;border-left:3px solid #42a5f5;padding:7px 9px;background:rgba(33,150,243,.11);opacity:.96}.cd2-trigger-message{border-radius:6px;padding:8px 10px;margin:8px 0;background:rgba(25,118,210,.13);white-space:pre-wrap;word-break:break-word}.cd2-trigger-error{background:rgba(211,47,47,.16);border-left:3px solid #ef5350}
+    .cd2-trigger-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:5px 0}.cd2-trigger-muted{opacity:.68}.cd2-trigger-hint,.cd2-trigger-note{font-size:12px;opacity:.78;line-height:1.58;margin-top:7px}.cd2-trigger-note{box-sizing:border-box;border-left:3px solid #42a5f5;padding:7px 9px;background:rgba(33,150,243,.11);opacity:.96}.cd2-trigger-message{border-radius:6px;padding:8px 10px;margin:8px 0;background:rgba(25,118,210,.13);white-space:pre-wrap;word-break:break-word}.cd2-trigger-error{background:rgba(211,47,47,.16);border-left:3px solid #ef5350}.cd2-trigger-callout{box-sizing:border-box;border:1px solid #ef9a9a;border-left:4px solid #d32f2f;border-radius:7px;padding:9px 11px;margin:9px 0;background:rgba(211,47,47,.2);white-space:pre-wrap;word-break:break-word}.cd2-trigger-callout strong{display:block;margin-bottom:4px}.cd2-trigger-callout ul{margin:4px 0 0 18px;padding:0}
     .cd2-trigger-pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:12px;background:rgba(127,127,127,.17);white-space:nowrap}.cd2-trigger-pill.ok{background:rgba(46,125,50,.23)}.cd2-trigger-pill.bad{background:rgba(211,47,47,.23)}.cd2-trigger-pill.info{background:rgba(33,150,243,.2)}.cd2-trigger-pill.warn{background:rgba(245,124,0,.23)}
     .cd2-trigger-stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:7px}.cd2-trigger-stat{min-width:0;padding:8px;border-radius:7px;background:rgba(127,127,127,.085)}.cd2-trigger-stat span{display:block;font-size:11px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cd2-trigger-stat strong{display:block;font-size:18px;line-height:1.15;margin-top:3px}.cd2-trigger-path{margin:5px 0;word-break:break-all;white-space:pre-wrap;font-family:monospace;font-size:11px}.cd2-trigger-stack{min-width:0}
     .cd2-trigger-rule{border:1px solid rgba(127,127,127,.25);border-radius:7px;padding:9px;margin:8px 0;background:rgba(127,127,127,.035)}.cd2-trigger-rule-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;font-weight:600}.cd2-trigger-rule .cd2-trigger-grid{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
@@ -64,7 +64,8 @@ function injectStyle() {
     .cd2-trigger-event-list{max-height:min(58vh,560px);overflow:auto;padding-right:2px}.cd2-trigger-event-item{border:1px solid rgba(127,127,127,.24);border-radius:7px;margin:6px 0;overflow:hidden}.cd2-trigger-event-toggle{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;width:100%;gap:8px;text-align:left;background:rgba(127,127,127,.07)!important;border:0!important;border-radius:0!important;padding:9px!important}.cd2-trigger-event-toggle:hover{background:rgba(33,150,243,.14)!important}.cd2-trigger-event-main{min-width:0}.cd2-trigger-event-main strong,.cd2-trigger-event-main span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cd2-trigger-event-main span{font-size:12px;opacity:.72;margin-top:2px}.cd2-trigger-event-at{font-size:11px;opacity:.68;white-space:nowrap}.cd2-trigger-event-arrow{font-size:12px;opacity:.85;white-space:nowrap}
     .cd2-trigger-category,.cd2-trigger-level{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:11px;white-space:nowrap}.cd2-trigger-category{background:rgba(127,127,127,.2)}.cd2-trigger-category.cd2-category-cd2{background:rgba(33,150,243,.25)}.cd2-trigger-category.cd2-category-generate{background:rgba(46,125,50,.25)}.cd2-trigger-category.cd2-category-delete{background:rgba(245,124,0,.28)}.cd2-trigger-category.cd2-category-refresh{background:rgba(123,31,162,.28)}.cd2-trigger-category.cd2-category-metadata{background:rgba(0,137,123,.28)}.cd2-trigger-category.cd2-category-subtitle{background:rgba(0,121,107,.28)}.cd2-trigger-level{background:rgba(127,127,127,.18)}.cd2-trigger-level.ok{background:rgba(46,125,50,.25)}.cd2-trigger-level.warn{background:rgba(245,124,0,.25)}.cd2-trigger-level.bad{background:rgba(211,47,47,.25)}
     .cd2-trigger-event-detail{padding:9px 10px;border-top:1px solid rgba(127,127,127,.22);background:rgba(0,0,0,.06)}.cd2-trigger-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px}.cd2-trigger-detail-item{min-width:0;padding:6px 7px;border-radius:5px;background:rgba(127,127,127,.07)}.cd2-trigger-detail-item strong{display:block;font-size:11px;opacity:.68;margin-bottom:2px}.cd2-trigger-detail-item span{display:block;white-space:pre-wrap;word-break:break-word;font-size:12px}.cd2-trigger-json{box-sizing:border-box;max-height:190px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:6px;background:rgba(0,0,0,.2);font:11px/1.5 monospace;white-space:pre-wrap;word-break:break-word}.cd2-trigger-event-empty{padding:16px;text-align:center;opacity:.68}
-    @media (max-width:600px){.cd2-trigger-config,.cd2-trigger-page{padding:8px}.cd2-trigger-overview-grid{grid-template-columns:1fr}.cd2-trigger-event-toggle{grid-template-columns:auto minmax(0,1fr) auto}.cd2-trigger-event-at{grid-column:2;grid-row:2}.cd2-trigger-event-arrow{grid-column:3;grid-row:1/3}.cd2-trigger-footer{position:static}}
+    .cd2-trigger-field>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.cd2-trigger-rule{min-width:0}.cd2-trigger-stack,.cd2-trigger-card{min-width:0}
+    @media (max-width:600px){.cd2-trigger-config,.cd2-trigger-page{padding:8px}.cd2-trigger-overview-grid,.cd2-trigger-grid,.cd2-trigger-grid-wide,.cd2-trigger-rule .cd2-trigger-grid{grid-template-columns:minmax(0,1fr)}.cd2-trigger-field>span{white-space:normal;overflow-wrap:anywhere;overflow:visible;text-overflow:clip}.cd2-trigger-card-head{flex-wrap:wrap}.cd2-trigger-event-toggle{grid-template-columns:auto minmax(0,1fr) auto}.cd2-trigger-event-at{grid-column:2;grid-row:2}.cd2-trigger-event-arrow{grid-column:3;grid-row:1/3}.cd2-trigger-footer{position:static}}
   `;
   document.head.appendChild(style);
 }
@@ -92,25 +93,6 @@ function displayValue(value, fallback = "暂无") {
 
 function jsonText(value) {
   try { return JSON.stringify(value, null, 2); } catch (error) { return String(value); }
-}
-
-function isSortSourceDeletion(value) {
-  const text = displayValue(value, "");
-  return text.includes("/Sort") && (text.includes("删除") || /delete/i.test(text));
-}
-
-function isIgnoredSortEvent(event) {
-  if (!event || typeof event !== "object") return false;
-  const details = event.details;
-  return isSortSourceDeletion([
-    event.raw_dest_path,
-    event.path,
-    event.source,
-    event.title,
-    event.message,
-    event.status,
-    typeof details === "string" ? details : jsonText(details || ""),
-  ].join(" "));
 }
 
 function eventField(event, keys, fallback = "暂无") {
@@ -148,12 +130,10 @@ function levelInfo(level, status, ignored = false) {
   return { label: displayValue(level || status, "记录"), className: "" };
 }
 
-function createUsageView(h, onBack, onClose, onSettings, options = {}) {
-  /* 插件内置使用说明，状态页和设置页共用，避免用户反复离开页面查找配置含义。 */
+function createUsageView(h, onBack, options = {}) {
+  /* 插件内置使用说明；导航动作由所属页面的全局页签和底栏负责。 */
   const actions = [];
   if (onBack) actions.push(h("button", { type: "button", class: "cd2-trigger-btn primary", onClick: onBack }, options.backLabel || "返回总览"));
-  if (onSettings) actions.push(h("button", { type: "button", class: "cd2-trigger-btn", onClick: onSettings }, "去设置"));
-  if (onClose) actions.push(h("button", { type: "button", class: "cd2-trigger-btn", onClick: onClose }, "关闭"));
   return h("div", { class: `cd2-trigger-page cd2-trigger-usage${options.compact ? " cd2-trigger-usage-compact" : ""}` }, [
     h("div", { class: "cd2-trigger-title" }, "使用说明"),
     h("div", { class: "cd2-trigger-subtitle" }, "Push 主触发、分类事件、目录映射和生成后动作的快速说明。"),
@@ -173,7 +153,7 @@ function createUsageView(h, onBack, onClose, onSettings, options = {}) {
         h("div", { class: "cd2-trigger-help-item" }, [h("strong", "115 网盘路径前缀"), h("span", "对应 115 网盘媒体库根目录，用来组成 STRM 请求里的 pan_path。按当前 115 助手 API 传网盘相对根目录，例如 /影视库。")]),
         h("div", { class: "cd2-trigger-help-item" }, [h("strong", "本地 STRM 根目录"), h("span", "MoviePilot/Emby 读取 STRM 和字幕的本地根目录；两类文件沿相同相对路径落盘。")]),
       ]),
-      h("div", { class: "cd2-trigger-note" }, "示例：CD2 目标 /115/影视库/电影/a.mkv（归一化为 /影视库/电影/a.mkv）→ 115 /影视库/电影/a.mkv → 本地 /media/MP_movieDB/影视库/电影/a.strm；/Sort 是备份源目录，不是插件监控前缀。"),
+      h("div", { class: "cd2-trigger-note" }, "示例：CD2 目标 /115/影视库/电影/a.mkv（归一化为 /影视库/电影/a.mkv）→ 115 /影视库/电影/a.mkv → 本地 /media/MP_movieDB/影视库/电影/a.strm。"),
     ]),
     h("div", { class: "cd2-trigger-card" }, [
       h("div", { class: "cd2-trigger-card-head" }, [h("strong", "文件、字幕和附加动作"), h("span", { class: "cd2-trigger-pill info" }, "按开关执行")]),
@@ -203,6 +183,7 @@ async function createConfigModule() {
     props: {
       initialConfig: { type: Object, default: () => ({}) },
       api: { type: Object, default: () => ({}) },
+      pluginId: { type: String, default: "Cd2UploadStrmTrigger" },
     },
     emits: ["save", "close", "switch"],
     setup(props, { emit }) {
@@ -245,10 +226,103 @@ async function createConfigModule() {
       const message = ref("");
       const messageError = ref(false);
       const testing = ref(false);
+      const validating = ref(false);
+      const saving = ref(false);
+      const validationMessage = ref("");
+      const validationErrors = ref([]);
+      let validationGeneration = 0;
+      let validationPending = 0;
+
+      const validationKeys = new Set([
+        "enabled",
+        "poll_fallback_enabled",
+        "delete_sync",
+        "media_server_refresh",
+        "scrape_metadata",
+        "auto_download_mediainfo",
+      ]);
 
       function setMessage(value, error = false) {
         message.value = value || "";
         messageError.value = error;
+      }
+
+      function clearValidation() {
+        validationMessage.value = "";
+        validationErrors.value = [];
+      }
+
+      function normalizeValidationResponse(response) {
+        const value = apiResult(response) || {};
+        const data = value?.data && typeof value.data === "object" && !Array.isArray(value.data)
+          ? value.data
+          : value;
+        return {
+          ...data,
+          valid: data.valid !== undefined ? !!data.valid : value.success !== false,
+          message: data.message || value.message || "配置校验失败",
+          errors: Array.isArray(data.errors) ? data.errors : [],
+        };
+      }
+
+      function showValidation(result, fallback = "配置校验失败，请先处理提示") {
+        const errors = Array.isArray(result?.errors) ? result.errors.filter((item) => item && item.message) : [];
+        validationErrors.value = errors;
+        validationMessage.value = result?.message || fallback;
+        const firstTab = errors.find((item) => item.tab)?.tab;
+        if (firstTab && tabs.some((tab) => tab.key === firstTab)) activeTab.value = firstTab;
+      }
+
+      function revertInvalidFeatures(result) {
+        const features = new Set((result?.errors || []).map((item) => item?.feature).filter(Boolean));
+        if (features.has("media_server_refresh")) config.media_server_refresh = false;
+        if (features.has("delete_sync")) config.delete_sync = false;
+        if (features.has("poll_fallback_enabled")) config.poll_fallback_enabled = false;
+        if (features.has("moviepilot_actions")) {
+          config.scrape_metadata = false;
+          config.auto_download_mediainfo = false;
+        }
+      }
+
+      function snapshotKey(value) {
+        try { return JSON.stringify(value); } catch (error) { return String(value); }
+      }
+
+      function matchesCurrentConfig(snapshot) {
+        return snapshotKey(snapshot) === snapshotKey(clone(config));
+      }
+
+      async function validateConfiguration(snapshot = clone(config)) {
+        /* 每次校验固定发送调用时的快照；响应过期时不覆盖当前表单状态。 */
+        const requestConfig = clone(snapshot);
+        const generation = ++validationGeneration;
+        validationPending += 1;
+        validating.value = true;
+        try {
+          let result;
+          try {
+            const response = await props.api.post(
+              `/plugin/${props.pluginId || "Cd2UploadStrmTrigger"}/validate`,
+              requestConfig,
+            );
+            result = normalizeValidationResponse(response);
+          } catch (error) {
+            result = {
+              valid: false,
+              message: "配置校验请求失败，请稍后重试",
+              errors: [{ field: "", tab: activeTab.value, message: "无法完成前置校验" }],
+            };
+          }
+          result._generation = generation;
+          if (generation === validationGeneration) {
+            if (result.valid) clearValidation();
+            else showValidation(result);
+          }
+          return result;
+        } finally {
+          validationPending -= 1;
+          if (validationPending <= 0) validating.value = false;
+        }
       }
 
       function button(label, onClick, className = "", extra = {}) {
@@ -299,7 +373,24 @@ async function createConfigModule() {
 
       function checkField(label, key) {
         return h("label", { class: "cd2-trigger-check" }, [
-          h("input", { type: "checkbox", checked: !!config[key], onChange: (event) => { config[key] = event.target.checked; } }),
+          h("input", {
+            type: "checkbox",
+            checked: !!config[key],
+            onChange: async (event) => {
+              const checked = !!event.target.checked;
+              config[key] = checked;
+              if (!checked || !validationKeys.has(key)) return;
+              clearValidation();
+              const snapshot = clone(config);
+              const result = await validateConfiguration(snapshot);
+              if (result._generation !== validationGeneration || !matchesCurrentConfig(snapshot)) return;
+              if (!result.valid) {
+                config[key] = false;
+                revertInvalidFeatures(result);
+                showValidation(result);
+              }
+            },
+          }),
           h("span", label),
         ]);
       }
@@ -323,7 +414,7 @@ async function createConfigModule() {
         testing.value = true;
         setMessage("");
         try {
-          const response = apiResult(await props.api.post("/plugin/Cd2UploadStrmTrigger/test", clone(config)));
+          const response = apiResult(await props.api.post(`/plugin/${props.pluginId || "Cd2UploadStrmTrigger"}/test`, clone(config)));
           setMessage(response?.success ? (response.message || "连接测试成功") : (response?.message || "连接测试失败"), !response?.success);
         } catch (error) {
           setMessage(error?.message || "连接测试失败", true);
@@ -332,9 +423,35 @@ async function createConfigModule() {
         }
       }
 
-      function save() {
-        /* 将配置提交给 MoviePilot 宿主保存。 */
-        emit("save", clone(config));
+      async function save() {
+        /* 保存前再次校验，避免绕过开关事件直接提交无效配置。 */
+        if (saving.value) return;
+        saving.value = true;
+        try {
+          let snapshot = clone(config);
+          clearValidation();
+          let result = await validateConfiguration(snapshot);
+          if (result._generation !== validationGeneration || !matchesCurrentConfig(snapshot)) {
+            snapshot = clone(config);
+            result = await validateConfiguration(snapshot);
+          }
+          if (!matchesCurrentConfig(snapshot)) {
+            showValidation({
+              valid: false,
+              message: "配置在校验期间发生变化，请重新保存",
+              errors: [{ field: "", tab: activeTab.value, message: "请确认当前配置后重试" }],
+            });
+            return;
+          }
+          if (!result.valid) {
+            revertInvalidFeatures(result);
+            showValidation(result);
+            return;
+          }
+          emit("save", clone(snapshot));
+        } finally {
+          saving.value = false;
+        }
       }
 
       function moveTab(delta) {
@@ -345,6 +462,14 @@ async function createConfigModule() {
 
       function tabButton(tab) {
         return button(tab.label, () => { activeTab.value = tab.key; }, `cd2-trigger-tab${activeTab.value === tab.key ? " active" : ""}`);
+      }
+
+      function renderValidationCallout() {
+        if (!validationMessage.value && !validationErrors.value.length) return null;
+        return h("div", { class: "cd2-trigger-callout", role: "alert" }, [
+          h("strong", validationMessage.value || "请先处理配置校验提示"),
+          validationErrors.value.length ? h("ul", validationErrors.value.map((error, index) => h("li", { key: `${error.field || "error"}-${index}` }, error.message))) : null,
+        ]);
       }
 
       function renderConnectionTab() {
@@ -437,7 +562,7 @@ async function createConfigModule() {
             checkField("由本插件刷新 Emby（媒体/字幕/删除，防抖）", "media_server_refresh"),
             h("div", { class: "cd2-trigger-grid" }, [numberField("Emby 刷新防抖（秒）", "emby_refresh_debounce", 0, 120, 0.5)]),
             checkField("同步 CD2 删除到本地（仅删除对应字幕/STRM和空目录）", "delete_sync"),
-            h("div", { class: "cd2-trigger-note" }, "删除同步默认关闭；开启后仅处理监控目录中对应的本地字幕/STRM，并只清理确实为空的目录，不递归删除其他文件。/Sort 源文件删除属于非监控事件，已忽略。"),
+            h("div", { class: "cd2-trigger-note" }, "删除同步默认关闭；开启后仅处理监控目录中对应的本地字幕/STRM，并只清理确实为空的目录，不递归删除其他文件。"),
           ]),
         ]);
       }
@@ -447,7 +572,7 @@ async function createConfigModule() {
         if (activeTab.value === "files") return renderFilesTab();
         if (activeTab.value === "actions") return renderActionsTab();
         if (activeTab.value === "usage") {
-          return createUsageView(h, () => { activeTab.value = "connection"; }, () => emit("close"), null, { compact: true, backLabel: "返回连接与监听" });
+          return createUsageView(h, null, { compact: true });
         }
         return renderConnectionTab();
       }
@@ -460,15 +585,16 @@ async function createConfigModule() {
         const tabIndex = tabs.findIndex((tab) => tab.key === activeTab.value);
         return h("form", { class: "cd2-trigger-config", onSubmit: (event) => { event.preventDefault(); save(); } }, [
           h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
-          h("div", { class: "cd2-trigger-subtitle" }, "v0.8.0 · Push 主触发、分类事件历史、多页设置；保留现有测试、保存和关闭交互。"),
+          h("div", { class: "cd2-trigger-subtitle" }, "v0.8.3 · Push 主触发、分类事件历史、多页设置和保存前置校验。"),
           h("div", { class: "cd2-trigger-tabs", role: "tablist" }, tabs.map(tabButton)),
           renderTabBody(),
+          renderValidationCallout(),
           message.value ? h("div", { class: `cd2-trigger-message${messageError.value ? " cd2-trigger-error" : ""}` }, message.value) : null,
           h("div", { class: "cd2-trigger-actions cd2-trigger-footer" }, [
             button("上一页", () => moveTab(-1), "subtle", { disabled: tabIndex <= 0 }),
             button("下一页", () => moveTab(1), "subtle", { disabled: tabIndex >= tabs.length - 1 }),
-            button(testing.value ? "测试中…" : "测试连接", testConnection, "", { disabled: testing.value }),
-            h("button", { type: "submit", class: "cd2-trigger-btn primary" }, "保存配置"),
+            button(testing.value ? "测试中…" : "测试连接", testConnection, "", { disabled: testing.value || saving.value }),
+            h("button", { type: "submit", class: "cd2-trigger-btn primary", disabled: saving.value || validating.value }, saving.value ? "保存中…" : "保存配置"),
             button("关闭", () => emit("close")),
           ]),
         ]);
@@ -494,24 +620,46 @@ async function createPageModule() {
     emits: ["close", "switch"],
     setup(props, { emit }) {
       const status = ref({});
-      const loading = ref(false);
+      const manualRefreshing = ref(false);
       const triggering = ref(false);
       const message = ref("");
       const activeTab = ref("overview");
       const expandedEventId = ref("");
       let timer = null;
+      let statusRequest = null;
 
       const endpointId = () => props.pluginId || "Cd2UploadStrmTrigger";
 
-      async function loadStatus() {
-        /* 从后端读取监听器状态；同时兼容旧宿主的响应包装。 */
-        loading.value = true;
+      async function loadStatus(manual = false) {
+        /* 状态请求单飞；自动刷新不改变底栏按钮，手动刷新才显示稳定反馈。 */
+        if (manual && manualRefreshing.value) return statusRequest;
+        if (manual) manualRefreshing.value = true;
+        if (statusRequest) {
+          try {
+            const ok = await statusRequest;
+            if (manual && ok) message.value = "状态已刷新";
+          } finally {
+            if (manual) manualRefreshing.value = false;
+          }
+          return statusRequest;
+        }
+        const request = (async () => {
+          try {
+            const next = apiPayload(await props.api.get(`/plugin/${endpointId()}/status`));
+            if (next && typeof next === "object") status.value = { ...status.value, ...next };
+            return true;
+          } catch (error) {
+            message.value = error?.message || "读取状态失败";
+            return false;
+          }
+        })();
+        statusRequest = request;
         try {
-          status.value = apiPayload(await props.api.get(`/plugin/${endpointId()}/status`));
-        } catch (error) {
-          message.value = error?.message || "读取状态失败";
+          const ok = await request;
+          if (manual && ok) message.value = "状态已刷新";
         } finally {
-          loading.value = false;
+          if (statusRequest === request) statusRequest = null;
+          if (manual) manualRefreshing.value = false;
         }
       }
 
@@ -519,9 +667,10 @@ async function createPageModule() {
         /* 请求后台立即检查一次 CD2 上传任务。 */
         triggering.value = true;
         try {
-          const response = apiPayload(await props.api.post(`/plugin/${endpointId()}/trigger`, {}));
-          message.value = response?.message || "已请求检查";
-          await loadStatus();
+          const response = apiResult(await props.api.post(`/plugin/${endpointId()}/trigger`, {}));
+          const payload = response?.data && typeof response.data === "object" ? response.data : response;
+          message.value = response?.message || payload?.message || "已请求检查";
+          await loadStatus(false);
         } catch (error) {
           message.value = error?.message || "触发失败";
         } finally {
@@ -533,15 +682,9 @@ async function createPageModule() {
         return h("button", { type: "button", class: `cd2-trigger-btn ${className}`.trim(), onClick, ...extra }, label);
       }
 
-      function settingsButton() {
-        return button("去设置", () => emit("switch"), "small");
-      }
-
-      function cardHead(title, subtitle = "", withSettings = true) {
-        const actions = withSettings ? [settingsButton()] : [];
+      function cardHead(title, subtitle = "") {
         return h("div", { class: "cd2-trigger-card-head" }, [
           h("div", [h("strong", title), subtitle ? h("small", subtitle) : null]),
-          actions.length ? h("div", { class: "cd2-trigger-actions" }, actions) : null,
         ]);
       }
 
@@ -588,8 +731,7 @@ async function createPageModule() {
         const key = eventKey(event, index);
         const expanded = expandedEventId.value === key;
         const category = categoryInfo(event.category);
-        const ignored = isIgnoredSortEvent(event);
-        const level = levelInfo(event.level, event.status, ignored);
+        const level = levelInfo(event.level, event.status, event.status === "ignored");
         const title = displayValue(event.title || event.message, "未命名事件");
         const messageText = event.title && event.message ? displayValue(event.message, "") : "";
         const detailRows = eventDetails(event);
@@ -610,7 +752,6 @@ async function createPageModule() {
             h("div", { class: "cd2-trigger-detail-grid" }, detailRows.map(([label, value]) => h("div", { class: "cd2-trigger-detail-item", key: label }, [h("strong", label), h("span", value)]))),
             event.message ? h("div", { class: "cd2-trigger-message" }, `消息：${displayValue(event.message)}`) : null,
             event.details !== undefined && event.details !== null ? h("pre", { class: "cd2-trigger-json" }, jsonText(event.details)) : null,
-            h("div", { class: "cd2-trigger-actions" }, [settingsButton()]),
           ]) : null,
         ]);
       }
@@ -620,7 +761,7 @@ async function createPageModule() {
           ["监听", status.value.last_error],
           ["字幕", status.value.last_subtitle_error],
           ["Emby 刷新", status.value.last_emby_refresh_error],
-        ].filter(([, value]) => value && !isSortSourceDeletion(value));
+        ].filter(([, value]) => value);
       }
 
       function renderOverview() {
@@ -647,10 +788,9 @@ async function createPageModule() {
               h("span", `快速补扫：${displayValue(current.rapid_rescan_count, "0")}`),
               h("span", `文件变更：${displayValue(current.filesystem_event_count, "0")}`),
             ]),
-            h("div", { class: "cd2-trigger-note" }, "/Sort 源文件删除属于非监控事件，已忽略。该提示是正常业务说明，不会渲染成错误。"),
           ]),
           h("div", { class: "cd2-trigger-card cd2-trigger-card-wide" }, [
-            cardHead("任务、队列与处理统计", "当前状态快照；点击卡片右上角可进入设置。"),
+            cardHead("任务、队列与处理统计", "当前状态快照。"),
             h("div", { class: "cd2-trigger-stat-grid" }, [
               stat("CD2 当前任务", current.upload_count),
               stat("本轮列表任务", current.task_count),
@@ -700,7 +840,7 @@ async function createPageModule() {
                 h("span", `待下载：${displayValue(current.subtitle_pending_count, "0")}`),
               ]),
               h("div", { class: "cd2-trigger-path" }, current.last_subtitle_file || "暂无最近字幕文件"),
-              current.last_subtitle_error && !isSortSourceDeletion(current.last_subtitle_error) ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近字幕错误：${current.last_subtitle_error}`) : null,
+              current.last_subtitle_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近字幕错误：${current.last_subtitle_error}`) : null,
             ]),
             h("div", { class: "cd2-trigger-card" }, [
               cardHead("CD2 删除同步", "仅在启用删除同步时处理本地 STRM/字幕。"),
@@ -720,12 +860,11 @@ async function createPageModule() {
               ]),
               h("div", { class: "cd2-trigger-path" }, `服务器：${Array.isArray(current.last_emby_refresh_servers) ? (current.last_emby_refresh_servers.join(", ") || "暂无") : displayValue(current.last_emby_refresh_servers)}`),
               h("div", { class: "cd2-trigger-muted" }, current.last_emby_refresh_at || "暂无刷新记录"),
-              current.last_emby_refresh_error && !isSortSourceDeletion(current.last_emby_refresh_error) ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近刷新错误：${current.last_emby_refresh_error}`) : null,
+              current.last_emby_refresh_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近刷新错误：${current.last_emby_refresh_error}`) : null,
             ]),
             h("div", { class: "cd2-trigger-card" }, [
-              cardHead("错误摘要", "/Sort 源文件删除的忽略说明不会计入错误。"),
+              cardHead("错误摘要", "只显示需要处理的运行错误。"),
               errors.length ? errors.map(([label, value]) => h("div", { class: "cd2-trigger-message cd2-trigger-error", key: label }, `${label}：${value}`)) : h("div", { class: "cd2-trigger-muted" }, "当前没有可见错误。"),
-              h("div", { class: "cd2-trigger-note" }, "/Sort 源文件删除属于非监控事件，已忽略。"),
             ]),
           ]),
         ]);
@@ -739,36 +878,37 @@ async function createPageModule() {
             cardHead("事件历史", `最近 10 条（当前共 ${total} 条），按时间倒序；点击一条展开详情。`),
             h("div", { class: "cd2-trigger-row" }, Object.entries(categoryMeta).map(([key, info]) => h("span", { class: `cd2-trigger-category ${info.className}`, key }, info.label))),
             events.length ? h("div", { class: "cd2-trigger-event-list" }, events.map(({ event }, index) => renderEvent(event, index))) : h("div", { class: "cd2-trigger-event-empty" }, "后端尚未返回事件历史；收到分类事件后，最近 10 条会显示在这里。"),
-            h("div", { class: "cd2-trigger-note" }, "详情包含原始 destPath、规范化 path、来源、操作类型/状态、消息类型、原因和结果；/Sort 源文件删除属于非监控事件，已忽略。"),
+            h("div", { class: "cd2-trigger-note" }, "详情包含原始 destPath、规范化 path、来源、操作类型/状态、消息类型、原因和结果。"),
           ]),
         ]);
       }
 
       onMounted(() => {
-        loadStatus();
-        timer = setInterval(loadStatus, 10000);
+        void loadStatus(false);
+        timer = setInterval(() => { void loadStatus(false); }, 10000);
       });
       onUnmounted(() => { if (timer) clearInterval(timer); });
 
       return () => h("div", { class: "cd2-trigger-page" }, [
         h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
-        h("div", { class: "cd2-trigger-subtitle" }, "v0.8.0 · 紧凑总览、最近 10 条分类事件和可展开详情"),
+        h("div", { class: "cd2-trigger-subtitle" }, "v0.8.3 · 紧凑总览、最近 10 条分类事件和可展开详情"),
         h("div", { class: "cd2-trigger-tabs", role: "tablist" }, [
           button("总览", () => { activeTab.value = "overview"; }, `cd2-trigger-tab${activeTab.value === "overview" ? " active" : ""}`),
           button("事件", () => { activeTab.value = "events"; }, `cd2-trigger-tab${activeTab.value === "events" ? " active" : ""}`),
           button("说明", () => { activeTab.value = "usage"; }, `cd2-trigger-tab${activeTab.value === "usage" ? " active" : ""}`),
         ]),
         activeTab.value === "events" ? renderEvents() : activeTab.value === "usage"
-          ? createUsageView(h, () => { activeTab.value = "overview"; }, () => emit("close"), () => emit("switch"))
+          ? createUsageView(h, () => { activeTab.value = "overview"; })
           : renderOverview(),
         message.value ? h("div", { class: "cd2-trigger-message" }, message.value) : null,
-        h("div", { class: "cd2-trigger-actions cd2-trigger-footer" }, [
-          button(loading.value ? "刷新中…" : "刷新状态", loadStatus, "", { disabled: loading.value }),
-          button(triggering.value ? "触发中…" : "立即检查上传", trigger, "primary", { disabled: triggering.value }),
-          button("使用说明", () => { activeTab.value = "usage"; }),
-          button("设置", () => emit("switch")),
-          button("关闭", () => emit("close")),
-        ]),
+        activeTab.value !== "usage"
+          ? h("div", { class: "cd2-trigger-actions cd2-trigger-footer" }, [
+              button(manualRefreshing.value ? "刷新中…" : "刷新状态", () => { void loadStatus(true); }, "", { disabled: manualRefreshing.value }),
+              button(triggering.value ? "触发中…" : "立即检查上传", trigger, "primary", { disabled: triggering.value }),
+              button("设置", () => emit("switch")),
+              button("关闭", () => emit("close")),
+            ])
+          : null,
       ]);
     },
   });
