@@ -5,9 +5,10 @@ from __future__ import annotations
 import posixpath
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -31,7 +32,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
     plugin_name = "CD2 上传触发 115 STRM"
     plugin_desc = "监听 CloudDrive2 挂载/RemoteUpload 上传和文件变更，媒体调用 115 网盘 STRM 助手生成增量 STRM，字幕按限速下载到本地，并可批量刷新 Emby、同步删除。"
     plugin_icon = "https://raw.githubusercontent.com/cloud-fs/clouddrive-mediaserver-plugin/main/icon.png"
-    plugin_version = "0.5.0"
+    plugin_version = "0.8.0"
     plugin_author = "wubushanyan"
     author_url = "https://github.com/wubushanyan"
     plugin_config_prefix = "cd2uploadstrmtrigger_"
@@ -48,6 +49,17 @@ class Cd2UploadStrmTrigger(_PluginBase):
     RAPID_RESCAN_DELAYS = (0.2, 0.6, 1.2, 2.5)
     PAYLOAD_DEDUP_SECONDS = 60.0
     SUBTITLE_STABILITY_PROBE_INTERVAL = 1.0
+    EVENT_HISTORY_LIMIT = 100
+    EVENT_HISTORY_PAGE_SIZE = 10
+
+    EVENT_CATEGORY_LABELS = {
+        "cd2_event": "CD2事件",
+        "generate_event": "生成事件",
+        "delete_event": "删除事件",
+        "refresh_event": "刷新事件",
+        "metadata_event": "元数据下载事件",
+        "subtitle_event": "字幕事件",
+    }
 
     DEFAULT_EXTENSIONS = (
         "mkv,mp4,ts,avi,mov,m4v,wmv,flv,m2ts,iso,rmvb,webm,mpeg,mpg,3gp,asf,tp,f4v"
@@ -61,13 +73,23 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._config: Dict[str, Any] = self._default_config()
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
+        self._manual_scan_event = threading.Event()
         self._ready_event = threading.Event()
         self._rapid_rescan_event = threading.Event()
         self._state_lock = threading.RLock()
+        self._history_lock = threading.RLock()
         self._pending_lock = threading.RLock()
         self._scan_lock = threading.Lock()
+        self._push_buffer_lock = threading.RLock()
+        self._push_dispatch_lock = threading.RLock()
         self._push_client: Optional[CloudDrive2Client] = None
         self._threads: List[threading.Thread] = []
+        self._push_buffer: Deque[Any] = deque(maxlen=1000)
+        self._event_history: Deque[Dict[str, Any]] = deque(
+            maxlen=self.EVENT_HISTORY_LIMIT
+        )
+        self._event_sequence = 0
+        self._last_push_upload_count: Optional[int] = None
         self._task_states: Dict[str, int] = {}
         self._pending: Dict[str, Dict[str, Any]] = {}
         self._subtitle_pending: Dict[str, Dict[str, Any]] = {}
@@ -107,6 +129,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
             "subtitle_stability_delay": 3.0,
             "emby_refresh_debounce": 5.0,
             "delete_sync": False,
+            "poll_fallback_enabled": False,
         }
 
     @staticmethod
@@ -147,6 +170,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
             "emby_refresh_pending_count": 0,
             "delete_sync_count": 0,
             "delete_sync_missing_count": 0,
+            "delete_sync_failure_count": 0,
             "last_delete_at": "",
             "last_delete_path": "",
             "last_delete_local_paths": [],
@@ -154,6 +178,34 @@ class Cd2UploadStrmTrigger(_PluginBase):
             "last_subtitle_file": "",
             "last_subtitle_error": "",
             "poll_count": 0,
+            "push_primary": True,
+            "push_connected": False,
+            "baseline_completed": False,
+            "baseline_at": "",
+            "poll_fallback_enabled": False,
+            "last_scan_source": "",
+            "last_scan_at": "",
+            "last_scan_upload_count": 0,
+            "last_scan_task_count": 0,
+            "last_push_upload_count": 0,
+            "push_count_change_count": 0,
+            "manual_scan_count": 0,
+            "metadata_success_count": 0,
+            "metadata_fail_count": 0,
+            "last_metadata_at": "",
+            "last_metadata_result": {},
+            "cd2_event_count": 0,
+            "cd2_received_count": 0,
+            "received_event_count": 0,
+            "non_monitor_count": 0,
+            "ignored_event_count": 0,
+            "event_counts": {},
+            "event_stats": {
+                "received": 0,
+                "non_monitor": 0,
+                "ignored": 0,
+            },
+            "event_history": [],
         }
 
     @staticmethod
@@ -178,6 +230,19 @@ class Cd2UploadStrmTrigger(_PluginBase):
         except (TypeError, ValueError):
             number = default
         return max(minimum, min(number, maximum))
+
+    @staticmethod
+    def _bool(value: Any, default: bool = False) -> bool:
+        """将配置中的布尔值安全转换，兼容前端传入的字符串。"""
+        if value is None:
+            return default
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "enabled"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "disabled", ""}:
+                return False
+        return bool(value)
 
     @classmethod
     def _normalize_path(cls, value: Any) -> str:
@@ -243,7 +308,10 @@ class Cd2UploadStrmTrigger(_PluginBase):
         rules = [item for item in rules if item]
         defaults = cls._default_config()
         normalized = {
-            "enabled": bool(raw.get("enabled", raw.get("enable", defaults["enabled"]))),
+            "enabled": cls._bool(
+                raw.get("enabled", raw.get("enable", defaults["enabled"])),
+                defaults["enabled"],
+            ),
             "cd2_endpoint": cls._text(raw.get("cd2_endpoint")) or defaults["cd2_endpoint"],
             "cd2_token": cls._text(raw.get("cd2_token")),
             "moviepilot_url": cls._text(raw.get("moviepilot_url")) or defaults["moviepilot_url"],
@@ -262,10 +330,12 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 0.0,
                 60.0,
             ),
-            "scrape_metadata": bool(raw.get("scrape_metadata", False)),
-            "media_server_refresh": bool(raw.get("media_server_refresh", False)),
-            "auto_download_mediainfo": bool(raw.get("auto_download_mediainfo", False)),
-            "notify": bool(raw.get("notify", False)),
+            "scrape_metadata": cls._bool(raw.get("scrape_metadata", False)),
+            "media_server_refresh": cls._bool(raw.get("media_server_refresh", False)),
+            "auto_download_mediainfo": cls._bool(
+                raw.get("auto_download_mediainfo", False)
+            ),
+            "notify": cls._bool(raw.get("notify", False)),
             "cd2_api_root": cls._normalize_path(
                 raw.get("cd2_api_root") or defaults["cd2_api_root"]
             ),
@@ -281,7 +351,32 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 0.0,
                 120.0,
             ),
-            "delete_sync": bool(raw.get("delete_sync", defaults["delete_sync"])),
+            "delete_sync": cls._bool(
+                raw.get("delete_sync", defaults["delete_sync"]),
+                defaults["delete_sync"],
+            ),
+            "poll_fallback_enabled": cls._bool(
+                raw.get(
+                    "poll_fallback_enabled",
+                    raw.get(
+                        "fallback_poll_enabled",
+                        raw.get(
+                            "enable_poll_fallback",
+                            raw.get(
+                                "poll_fallback",
+                                raw.get(
+                                    "poll_enabled",
+                                    raw.get(
+                                        "periodic_poll_enabled",
+                                        defaults["poll_fallback_enabled"],
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                defaults["poll_fallback_enabled"],
+            ),
         }
         return normalized
 
@@ -301,7 +396,14 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self._pending = {}
         self._subtitle_pending = {}
         self._recent_payloads = {}
+        self._manual_scan_event.clear()
         self._rapid_rescan_event.clear()
+        with self._push_buffer_lock:
+            self._push_buffer.clear()
+        with self._history_lock:
+            self._event_history.clear()
+            self._event_sequence = 0
+        self._last_push_upload_count = None
         self._last_subtitle_request_at = 0.0
         self._subtitle_wake_event.clear()
         with self._emby_refresh_lock:
@@ -317,6 +419,9 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._processed_keys = set()
         self._stats = self._new_stats()
         self._stats["processed_count"] = len(self._processed_keys)
+        self._stats["poll_fallback_enabled"] = bool(
+            self._config.get("poll_fallback_enabled")
+        )
         if not self._config["enabled"]:
             return
         if not self._config["cd2_token"]:
@@ -381,6 +486,13 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 "auth": "bear",
                 "summary": "手动触发一次 CD2 上传检查",
             },
+            {
+                "path": "/events",
+                "endpoint": self.api_events,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "获取最近 CD2 STRM 事件",
+            },
         ]
 
     def api_status(self) -> schemas.Response:
@@ -413,29 +525,49 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 },
             )
         except Exception as exc:
-            logger.warning("【CD2 STRM触发器】连接测试失败：%s", exc)
+            logger.warning("【CD2 STRM触发器】【CD2事件】连接测试失败：%s", exc)
             return schemas.Response(success=False, message=f"连接测试失败：{exc}")
 
     def api_trigger(self) -> schemas.Response:
         """请求后台立即执行一次上传任务检查。"""
         if not self.get_state():
             return schemas.Response(success=False, message="插件未启用")
+        self._ensure_runtime_events()
+        self._manual_scan_event.set()
         self._wake_event.set()
         return schemas.Response(success=True, message="已请求立即检查 CD2 上传任务")
+
+    def api_events(self) -> schemas.Response:
+        """返回完整的内存事件窗口，状态接口也提供该窗口供前端截取。"""
+        return schemas.Response(
+            success=True,
+            data=self._event_history_snapshot(self.EVENT_HISTORY_LIMIT),
+        )
 
     @eventmanager.register(EventType.PluginAction)
     def handle_plugin_action(self, event: Event):
         """处理远程命令发出的手动检查事件。"""
         if not event or event.event_data.get("action") != "cd2_upload_strm_trigger":
             return
+        self._ensure_runtime_events()
+        self._manual_scan_event.set()
         self._wake_event.set()
 
     def _start_workers(self) -> None:
         """启动轮询、推送、STRM 批处理和字幕下载线程。"""
         self._stop_event.clear()
         self._wake_event.clear()
+        self._manual_scan_event.clear()
         self._subtitle_wake_event.clear()
         self._ready_event.clear()
+        with self._push_buffer_lock:
+            self._push_buffer.clear()
+        self._last_push_upload_count = None
+        with self._state_lock:
+            self._stats["push_primary"] = True
+            self._stats["poll_fallback_enabled"] = bool(
+                self._config.get("poll_fallback_enabled")
+            )
         self._stats["running"] = True
         poll_thread = threading.Thread(
             target=self._poll_loop,
@@ -473,27 +605,78 @@ class Cd2UploadStrmTrigger(_PluginBase):
             thread.start()
 
     def _poll_loop(self) -> None:
-        """定时读取 CD2 上传计数和任务列表，作为推送监听的可靠兜底。"""
+        """建立一次上传基线，并按配置执行手动/兜底扫描。"""
         # 启动后的第一次成功读取永远只建立状态基线，不处理列表中已经完成的任务。
-        first_scan = True
+        baseline_complete = self._ready_event.is_set()
         while not self._stop_event.is_set():
-            try:
-                self._scan_and_observe(
-                    allow_trigger=not first_scan,
-                    source="poll_baseline" if first_scan else "poll",
-                )
-                if first_scan:
-                    first_scan = False
+            if not baseline_complete:
+                try:
+                    count, _ = self._scan_and_observe(
+                        allow_trigger=False,
+                        source="poll_baseline",
+                    )
+                    baseline_complete = True
+                    self._last_push_upload_count = count
+                    with self._state_lock:
+                        self._stats["baseline_completed"] = True
+                        self._stats["baseline_at"] = self._now()
+                        self._stats["last_push_upload_count"] = count
                     self._ready_event.set()
-                    # 启动期间收到的推送只属于基线阶段，不处理其中的旧任务。
-                    self._rapid_rescan_event.clear()
-                elif self._rapid_rescan_event.is_set():
-                    self._run_rapid_rescans()
-                self._update_pending_count()
-            except Exception as exc:
-                self._set_error(f"轮询 CD2 上传任务失败：{exc}")
-            self._wake_event.wait(timeout=self._config.get("poll_interval", 5))
+                    logger.info(
+                        "【CD2 STRM触发器】【CD2事件】上传任务基线完成：当前上传数=%s；已有完成任务不处理",
+                        count,
+                    )
+                    # 基线完成后再消费启动期间已接收并暂存的 Push，避免丢失新事件。
+                    self._drain_push_buffer()
+                    self._update_pending_count()
+                except Exception as exc:
+                    self._set_error(
+                        f"读取 CD2 上传任务基线失败：{exc}",
+                        category="cd2_event",
+                        source="poll_baseline",
+                    )
+                    self._stop_event.wait(
+                        timeout=min(
+                            5.0,
+                            float(self._config.get("poll_interval", 5) or 5),
+                        )
+                    )
+                continue
+
+            fallback_enabled = bool(self._config.get("poll_fallback_enabled"))
+            woke = self._wake_event.wait(
+                timeout=float(self._config.get("poll_interval", 5))
+                if fallback_enabled
+                else 1.0
+            )
             self._wake_event.clear()
+            if self._stop_event.is_set():
+                return
+
+            if self._rapid_rescan_event.is_set():
+                self._run_rapid_rescans()
+            if self._manual_scan_event.is_set():
+                self._manual_scan_event.clear()
+                try:
+                    self._scan_and_observe(allow_trigger=True, source="manual")
+                    with self._state_lock:
+                        self._stats["manual_scan_count"] += 1
+                except Exception as exc:
+                    self._set_error(
+                        f"手动检查 CD2 上传任务失败：{exc}",
+                        category="cd2_event",
+                        source="manual",
+                    )
+            elif fallback_enabled and not woke:
+                try:
+                    self._scan_and_observe(allow_trigger=True, source="poll")
+                except Exception as exc:
+                    self._set_error(
+                        f"兜底轮询 CD2 上传任务失败：{exc}",
+                        category="cd2_event",
+                        source="poll",
+                    )
+            self._update_pending_count()
 
     def _scan_and_observe(self, allow_trigger: bool, source: str) -> Tuple[int, List[Any]]:
         """读取一次上传列表并记录/处理其中的任务。"""
@@ -502,13 +685,19 @@ class Cd2UploadStrmTrigger(_PluginBase):
         with self._state_lock:
             self._stats["connected"] = True
             self._stats["last_error"] = ""
-            self._stats["last_poll_at"] = self._now()
+            scan_at = self._now()
+            self._stats["last_poll_at"] = scan_at
+            self._stats["last_scan_at"] = scan_at
+            self._stats["last_scan_source"] = source
+            self._stats["last_scan_upload_count"] = count
+            self._stats["last_scan_task_count"] = len(tasks)
             self._stats["upload_count"] = count
             self._stats["task_count"] = len(tasks)
             self._stats["poll_count"] += 1
+        self._last_push_upload_count = count
         if tasks or source == "rapid":
             logger.info(
-                "【CD2 STRM触发器】%s扫描：当前上传数=%s，任务详情=%s",
+                "【CD2 STRM触发器】【CD2事件】%s扫描：当前上传数=%s，任务详情=%s",
                 source,
                 count,
                 len(tasks),
@@ -519,7 +708,9 @@ class Cd2UploadStrmTrigger(_PluginBase):
         return count, tasks
 
     def _request_rapid_rescan(self) -> None:
-        """请求轮询线程在当前周期后执行一组快速补扫。"""
+        """请求轮询线程执行一次由 Push 数量变化触发的短间隔补扫。"""
+        if not self._ready_event.is_set():
+            return
         self._rapid_rescan_event.set()
         self._wake_event.set()
 
@@ -529,7 +720,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
             return
         self._rapid_rescan_event.clear()
         logger.info(
-            "【CD2 STRM触发器】开始快速补扫，间隔=%s 秒",
+            "【CD2 STRM触发器】【CD2事件】开始按需快速补扫，间隔=%s 秒",
             ",".join(str(delay) for delay in self.RAPID_RESCAN_DELAYS),
         )
         for delay in self.RAPID_RESCAN_DELAYS:
@@ -540,8 +731,12 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 with self._state_lock:
                     self._stats["rapid_rescan_count"] += 1
             except Exception as exc:
-                self._set_error(f"快速补扫 CD2 上传任务失败：{exc}")
-        logger.info("【CD2 STRM触发器】快速补扫结束")
+                self._set_error(
+                    f"快速补扫 CD2 上传任务失败：{exc}",
+                    category="cd2_event",
+                    source="rapid",
+                )
+        logger.info("【CD2 STRM触发器】【CD2事件】按需快速补扫结束")
 
     def _poll_once(self) -> Tuple[int, List[Any]]:
         """执行一次 CD2 上传任务计数和列表读取。"""
@@ -559,8 +754,13 @@ class Cd2UploadStrmTrigger(_PluginBase):
             client.close()
 
     def _push_loop(self) -> None:
-        """订阅 CD2 PushMessage，直接接收上传任务状态变化。"""
-        self._ready_event.wait(timeout=20)
+        """完成基线后订阅 CD2 PushMessage，直接消费后续事件。"""
+        # 先完成一次成功基线，再建立 Push 长连接。否则 CD2 可能在订阅建立时
+        # 重放旧的 Finish 消息，无法区分启动前的历史事件和启动后的新事件。
+        while not self._stop_event.is_set() and not self._ready_event.wait(timeout=1):
+            pass
+        with self._push_buffer_lock:
+            self._push_buffer.clear()
         while not self._stop_event.is_set():
             client: Optional[CloudDrive2Client] = None
             try:
@@ -572,69 +772,221 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 )
                 with self._state_lock:
                     self._push_client = client
-                logger.info("【CD2 STRM触发器】CD2 PushMessage 已连接，监听上传和文件变更事件")
+                    self._stats["push_connected"] = True
+                logger.info(
+                    "【CD2 STRM触发器】【CD2事件】CD2 PushMessage 已连接，监听上传和文件变更事件"
+                )
                 for message in client.push_messages(self._stop_event):
                     if self._stop_event.is_set():
                         return
-                    message_type = int(message.messageType)
-                    if message_type not in (self.UPLOADER_MESSAGE, self.FILE_SYSTEM_MESSAGE):
+                    if not self._is_supported_push_message(message):
                         continue
-                    message_name = self._message_type_name(message_type)
-                    with self._state_lock:
-                        self._stats["last_push_at"] = self._now()
-                        self._stats["last_message_at"] = self._now()
-                        self._stats["last_message_type"] = message_name
-                        self._stats["last_event"] = message_name
-                    if message_type == self.FILE_SYSTEM_MESSAGE:
-                        if not message.HasField("fileSystemChange"):
-                            logger.warning(
-                                "【CD2 STRM触发器】收到 FILE_SYSTEM_CHANGE，但消息没有变更详情"
-                            )
-                        else:
-                            change = message.fileSystemChange
-                            self._observe_file_system_change(change)
-                            if int(getattr(change, "changeType", -1)) in (
-                                self.FILE_CREATE,
-                                self.FILE_RENAME,
-                            ):
-                                self._request_rapid_rescan()
+                    if not self._ready_event.is_set():
+                        self._buffer_push_message(message)
                         continue
-                    has_details = message.HasField("transferTaskStatus")
-                    task_count = (
-                        len(message.transferTaskStatus.uploadFileStatusChanges)
-                        if has_details
-                        else 0
-                    )
-                    logger.info(
-                        "【CD2 STRM触发器】收到 CD2 上传推送：messageType=%s(%s)，任务详情=%s",
-                        message_name,
-                        message_type,
-                        task_count,
-                    )
-                    if not has_details:
-                        logger.info(
-                            "【CD2 STRM触发器】上传推送只有数量变化，交给快速补扫捕获瞬时任务"
-                        )
-                    elif not self._ready_event.is_set():
-                        # 首次成功轮询完成前不消费推送任务，避免把启动阶段的旧任务
-                        # 写入状态表后又在基线扫描时误判为“新完成”。
-                        logger.info(
-                            "【CD2 STRM触发器】监听器尚未完成基线，本次上传推送仅唤醒轮询"
-                        )
-                    else:
-                        for task in message.transferTaskStatus.uploadFileStatusChanges:
-                            self._observe_task(task, allow_trigger=True, source="push")
-                    self._request_rapid_rescan()
+                    self._drain_push_buffer()
+                    self._handle_push_message(message)
             except Exception as exc:
                 if not self._stop_event.is_set():
-                    self._set_error(f"CD2 推送连接断开：{exc}")
+                    self._set_error(
+                        f"CD2 推送连接断开：{exc}",
+                        category="cd2_event",
+                        source="push",
+                    )
                     self._stop_event.wait(timeout=5)
             finally:
                 with self._state_lock:
                     if self._push_client is client:
                         self._push_client = None
+                    self._stats["push_connected"] = False
                 if client:
                     client.close()
+
+    def _is_supported_push_message(self, message: Any) -> bool:
+        """判断 PushMessage 是否是本插件需要记录的上传或文件变更事件。"""
+        try:
+            message_type = int(getattr(message, "messageType", -1))
+        except (TypeError, ValueError):
+            return False
+        return message_type in (self.UPLOADER_MESSAGE, self.FILE_SYSTEM_MESSAGE)
+
+    @staticmethod
+    def _has_field(message: Any, field_name: str) -> bool:
+        """兼容 protobuf 和纯逻辑测试替身的字段存在判断。"""
+        if message is None:
+            return False
+        has_field = getattr(message, "HasField", None)
+        if callable(has_field):
+            try:
+                return bool(has_field(field_name))
+            except (AttributeError, ValueError):
+                pass
+        return getattr(message, field_name, None) is not None
+
+    def _buffer_push_message(self, message: Any) -> None:
+        """在基线完成前暂存 Push，确保连接已监听但旧任务不会被消费。"""
+        with self._push_buffer_lock:
+            self._push_buffer.append(message)
+        logger.info(
+            "【CD2 STRM触发器】【CD2事件】基线未完成，暂存 PushMessage，等待基线后消费"
+        )
+
+    def _drain_push_buffer(self) -> None:
+        """在基线完成后按接收顺序消费暂存的 PushMessage。"""
+        if not self._ready_event.is_set():
+            return
+        with self._push_buffer_lock:
+            messages = list(self._push_buffer)
+            self._push_buffer.clear()
+        for message in messages:
+            self._handle_push_message(message)
+
+    def _push_transfer_details(
+        self, message: Any
+    ) -> Tuple[List[Any], Optional[int], bool]:
+        """读取 Push 中的任务详情和上传数量，兼容不同 CD2 消息包装形式。"""
+        transfer = None
+        if self._has_field(message, "transferTaskStatus"):
+            transfer = getattr(message, "transferTaskStatus", None)
+        details: List[Any] = []
+        if transfer is not None:
+            try:
+                details = list(getattr(transfer, "uploadFileStatusChanges", ()) or ())
+            except TypeError:
+                details = []
+        # 兼容某些测试/旧客户端把详情直接挂在 PushMessage 上的形式。
+        if not details:
+            try:
+                details = list(getattr(message, "uploadFileStatusChanges", ()) or ())
+            except TypeError:
+                details = []
+        if not details:
+            for detail_name in ("tasks", "task", "upload_task"):
+                candidate = getattr(message, detail_name, None)
+                if candidate is None:
+                    continue
+                if isinstance(candidate, (list, tuple, set)):
+                    details = list(candidate)
+                else:
+                    details = [candidate]
+                break
+        upload_count: Optional[int] = None
+        if transfer is not None and hasattr(transfer, "uploadCount"):
+            try:
+                upload_count = int(getattr(transfer, "uploadCount", 0))
+            except (TypeError, ValueError):
+                upload_count = None
+        elif hasattr(message, "uploadCount"):
+            try:
+                upload_count = int(getattr(message, "uploadCount", 0))
+            except (TypeError, ValueError):
+                upload_count = None
+        return details, upload_count, bool(details)
+
+    def _handle_push_message(self, message: Any) -> None:
+        """处理一条 PushMessage：详情直处理，只有数量变化才触发补扫。"""
+        self._ensure_runtime_events()
+        with self._push_dispatch_lock:
+            message_type = int(getattr(message, "messageType", -1))
+            if message_type not in (self.UPLOADER_MESSAGE, self.FILE_SYSTEM_MESSAGE):
+                return
+            message_name = self._message_type_name(message_type)
+            received_at = self._now()
+            with self._state_lock:
+                self._stats["last_push_at"] = received_at
+                self._stats["last_message_at"] = received_at
+                self._stats["last_message_type"] = message_name
+                self._stats["last_event"] = message_name
+
+            if message_type == self.FILE_SYSTEM_MESSAGE:
+                change = (
+                    getattr(message, "fileSystemChange", None)
+                    if self._has_field(message, "fileSystemChange")
+                    else None
+                )
+                self._record_event(
+                    "cd2_event",
+                    "INFO",
+                    "收到 CD2 文件系统推送",
+                    "FILE_SYSTEM_CHANGE 已接收",
+                    source="push",
+                    status="received" if change is not None else "ignored",
+                    details={"message_type": message_name, "has_details": change is not None},
+                )
+                if change is None:
+                    self._register_cd2_received(
+                        title="收到 CD2 文件系统推送",
+                        message="FILE_SYSTEM_CHANGE 消息没有变更详情",
+                        source="push",
+                        status="received",
+                        details={"message_type": message_name, "has_details": False},
+                    )
+                    logger.info(
+                        "【CD2 STRM触发器】【CD2事件】收到 FILE_SYSTEM_CHANGE，但消息没有变更详情"
+                    )
+                else:
+                    self._observe_file_system_change(change)
+                return
+
+            details, upload_count, has_details = self._push_transfer_details(message)
+            previous_count = self._last_push_upload_count
+            count_changed = (
+                upload_count is not None
+                and previous_count is not None
+                and upload_count != previous_count
+            )
+            if upload_count is not None:
+                self._last_push_upload_count = upload_count
+                with self._state_lock:
+                    self._stats["last_push_upload_count"] = upload_count
+                    if count_changed:
+                        self._stats["push_count_change_count"] += 1
+            self._record_event(
+                "cd2_event",
+                "INFO",
+                "收到 CD2 上传推送",
+                f"{message_name} 已接收",
+                source="push",
+                status="received",
+                details={
+                    "message_type": message_name,
+                    "task_count": len(details),
+                    "upload_count": upload_count,
+                    "count_changed": count_changed,
+                },
+            )
+            logger.info(
+                "【CD2 STRM触发器】【CD2事件】收到 CD2 上传推送：messageType=%s(%s)，任务详情=%s，上传数=%s",
+                message_name,
+                message_type,
+                len(details),
+                upload_count if upload_count is not None else "未知",
+            )
+            if has_details:
+                # 有详情时直接按每个任务的 Finish 状态处理，不调用周期/快速轮询。
+                for task in details:
+                    self._observe_task(task, allow_trigger=True, source="push")
+                return
+            self._register_cd2_received(
+                title="收到 CD2 上传数量事件",
+                message="UPLOADER_COUNT 消息没有任务详情",
+                source="push",
+                status="received",
+                details={
+                    "message_type": message_name,
+                    "upload_count": upload_count,
+                    "count_changed": count_changed,
+                },
+            )
+            if count_changed:
+                logger.info(
+                    "【CD2 STRM触发器】【CD2事件】上传数量变化但无任务详情，触发一次按需快速补扫"
+                )
+                self._request_rapid_rescan()
+            else:
+                logger.info(
+                    "【CD2 STRM触发器】【CD2事件】上传推送无详情且数量未变化，不执行扫描"
+                )
 
     def _dispatch_loop(self) -> None:
         """按批次调用 115 STRM API，并对暂时失败的任务进行有限重试。"""
@@ -642,7 +994,11 @@ class Cd2UploadStrmTrigger(_PluginBase):
             try:
                 self._flush_pending_if_due()
             except Exception as exc:
-                self._set_error(f"提交 115 STRM API 失败：{exc}")
+                self._set_error(
+                    f"提交 115 STRM API 失败：{exc}",
+                    category="generate_event",
+                    source="dispatch",
+                )
             self._stop_event.wait(timeout=1)
 
     def _subtitle_loop(self) -> None:
@@ -681,9 +1037,20 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     self._stats["last_subtitle_error"] = ""
                     self._stats["last_error"] = ""
                 logger.info(
-                    "【CD2 STRM触发器】字幕下载成功：%s%s",
+                    "【CD2 STRM触发器】【字幕事件】字幕下载成功：%s%s",
                     payload.get("cd2_path") or key,
                     f"（{detail}）" if detail else "",
+                )
+                self._record_event(
+                    "subtitle_event",
+                    "INFO",
+                    "字幕下载成功",
+                    detail or "字幕已下载到本地",
+                    source=item.get("source") or "subtitle",
+                    status="success",
+                    raw_dest_path=payload.get("raw_dest_path", ""),
+                    path=payload.get("cd2_path", ""),
+                    details={"local_file": payload.get("local_file", "")},
                 )
                 self._request_emby_refresh("subtitle", 1)
             except Exception as exc:
@@ -693,6 +1060,17 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     self._stats["last_subtitle_file"] = str(payload.get("local_file") or "")
                     self._stats["last_subtitle_error"] = str(exc)
                     self._stats["last_error"] = f"字幕下载失败：{exc}"
+                self._record_event(
+                    "subtitle_event",
+                    "WARNING",
+                    "字幕下载失败",
+                    str(exc),
+                    source=item.get("source") or "subtitle",
+                    status="retrying" if int(item.get("attempts", 0)) + 1 < 4 else "failed",
+                    raw_dest_path=payload.get("raw_dest_path", ""),
+                    path=payload.get("cd2_path", ""),
+                    details={"local_file": payload.get("local_file", "")},
+                )
                 if attempts < 4:
                     item["attempts"] = attempts
                     item["first_seen"] = time.monotonic()
@@ -702,7 +1080,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     with self._pending_lock:
                         self._subtitle_pending[key] = item
                     logger.warning(
-                        "【CD2 STRM触发器】字幕下载失败，%s 秒后重试（第 %s 次）：%s；原因：%s",
+                        "【CD2 STRM触发器】【字幕事件】字幕下载失败，%s 秒后重试（第 %s 次）：%s；原因：%s",
                         self._config.get("subtitle_interval", self.DEFAULT_SUBTITLE_INTERVAL),
                         attempts,
                         payload.get("cd2_path") or key,
@@ -712,7 +1090,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     with self._state_lock:
                         self._stats["subtitle_fail_count"] += 1
                     logger.error(
-                        "【CD2 STRM触发器】字幕连续失败，停止自动重试：%s；原因：%s",
+                        "【CD2 STRM触发器】【字幕事件】字幕连续失败，停止自动重试：%s；原因：%s",
                         payload.get("cd2_path") or key,
                         exc,
                     )
@@ -732,10 +1110,17 @@ class Cd2UploadStrmTrigger(_PluginBase):
 
     def _observe_task(self, task: Any, allow_trigger: bool, source: str = "poll") -> None:
         """记录任务状态，并在新完成任务命中规则时加入对应处理队列。"""
+        self._ensure_runtime_events()
         raw_destination = self._text(getattr(task, "destPath", ""))
         destination = self._normalize_path(raw_destination)
-        operator_value = int(getattr(task, "operatorType", -1))
-        status_value = int(getattr(task, "statusEnum", -1))
+        try:
+            operator_value = int(getattr(task, "operatorType", -1))
+        except (TypeError, ValueError):
+            operator_value = -1
+        try:
+            status_value = int(getattr(task, "statusEnum", -1))
+        except (TypeError, ValueError):
+            status_value = -1
         operator_name = self._operator_type_name(operator_value)
         status_name = self._status_name(status_value)
         with self._state_lock:
@@ -744,8 +1129,22 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._stats["last_task_status"] = status_name
             self._stats["last_dest_path"] = raw_destination
             self._stats["last_event"] = f"{source}:UPLOAD_TASK"
+        self._register_cd2_received(
+            title="收到 CD2 上传任务",
+            message=f"{status_name} 上传任务已接收",
+            source=source,
+            status="received",
+            raw_dest_path=raw_destination,
+            path=destination,
+            details={
+                "operator_type": operator_name,
+                "status": status_name,
+                "size": int(getattr(task, "size", 0) or 0),
+                "key": self._text(getattr(task, "key", "")),
+            },
+        )
         logger.info(
-            "【CD2 STRM触发器】收到 CD2 上传任务：source=%s operatorType=%s(%s) "
+            "【CD2 STRM触发器】【CD2事件】收到 CD2 上传任务：source=%s operatorType=%s(%s) "
             "statusEnum=%s(%s) status=%s destPath=%s size=%s key=%s",
             source,
             operator_name,
@@ -759,24 +1158,72 @@ class Cd2UploadStrmTrigger(_PluginBase):
         )
         key = self._task_key(task)
         if not key:
-            self._log_ignored(destination, "任务没有 key 或 destPath")
+            self._log_ignored(
+                destination,
+                "任务没有 key 或 destPath",
+                source=source,
+                status="ignored",
+            )
             return
-        previous = self._task_states.get(key)
-        self._task_states[key] = status_value
+        with self._state_lock:
+            previous = self._task_states.get(key)
+            self._task_states[key] = status_value
+
+        if not self._find_rule(destination):
+            self._log_non_monitor(
+                raw_dest_path=raw_destination or destination,
+                path=destination,
+                source=source,
+                details={"event_type": "upload_task", "status": status_name},
+            )
+            return
         if not allow_trigger:
-            logger.info("【CD2 STRM触发器】基线任务跳过：destPath=%s", destination)
+            self._record_event(
+                "cd2_event",
+                "INFO",
+                "上传基线任务跳过",
+                "基线中的任务不触发处理",
+                source=source,
+                status="baseline",
+                raw_dest_path=raw_destination,
+                path=destination,
+                details={"key": key, "status": status_name},
+            )
+            logger.info(
+                "【CD2 STRM触发器】【CD2事件】基线任务跳过：destPath=%s",
+                destination,
+            )
             return
         if status_value != self.FINISH_STATUS:
             return
         if previous == self.FINISH_STATUS:
-            logger.info("【CD2 STRM触发器】重复完成状态跳过：destPath=%s", destination)
+            self._record_event(
+                "cd2_event",
+                "INFO",
+                "重复完成任务跳过",
+                "任务已观察到 Finish 状态",
+                source=source,
+                status="skipped",
+                raw_dest_path=raw_destination,
+                path=destination,
+                details={"key": key},
+            )
+            logger.info(
+                "【CD2 STRM触发器】【CD2事件】重复完成状态跳过：destPath=%s",
+                destination,
+            )
             return
         built = self._build_file_payload_from_destination(
-            destination,
+            raw_destination or destination,
             int(getattr(task, "size", 0) or 0),
         )
         if not built:
-            self._log_ignored(destination, self._payload_ignore_reason(destination))
+            self._log_ignored(
+                destination,
+                self._payload_ignore_reason(destination),
+                source=source,
+                status="ignored",
+            )
             return
         kind, payload = built
         with self._state_lock:
@@ -785,11 +1232,16 @@ class Cd2UploadStrmTrigger(_PluginBase):
 
     def _observe_file_system_change(self, change: Any) -> None:
         """处理 CD2 文件系统 CREATE/RENAME/DELETE 事件。"""
+        self._ensure_runtime_events()
         change_type = int(getattr(change, "changeType", -1))
         change_name = self._file_change_type_name(change_type)
         raw_path = self._text(getattr(change, "path", ""))
         new_path = self._text(getattr(change, "newPath", ""))
-        file_info = change.theFile if change.HasField("theFile") else None
+        file_info = (
+            getattr(change, "theFile", None)
+            if self._has_field(change, "theFile")
+            else None
+        )
         full_path = self._text(getattr(file_info, "fullPathName", "")) if file_info else ""
         destination = self._normalize_path(full_path or new_path or raw_path)
         size = int(getattr(file_info, "size", 0) or 0) if file_info else 0
@@ -803,8 +1255,34 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._stats["last_task_status"] = change_name
             self._stats["last_dest_path"] = raw_path or destination
             self._stats["last_event"] = "filesystem:" + change_name
+        self._register_cd2_received(
+            title="收到 CD2 文件系统变更",
+            message=f"{change_name} 文件变更已接收",
+            source="filesystem",
+            status="received",
+            raw_dest_path=raw_path or full_path,
+            path=destination,
+            details={
+                "change_type": change_name,
+                "is_directory": is_directory,
+                "new_path": new_path,
+                "size": size,
+            },
+        )
+        if change_type == self.FILE_DELETE:
+            self._record_event(
+                "delete_event",
+                "INFO",
+                "收到删除事件",
+                "CD2 文件删除变更已接收",
+                source="filesystem",
+                status="received",
+                raw_dest_path=raw_path or full_path,
+                path=destination,
+                details={"is_directory": is_directory, "size": size},
+            )
         logger.info(
-            "【CD2 STRM触发器】收到 CD2 文件系统变更：changeType=%s(%s) "
+            "【CD2 STRM触发器】【CD2事件】收到 CD2 文件系统变更：changeType=%s(%s) "
             "isDirectory=%s path=%s newPath=%s fullPathName=%s size=%s",
             change_name,
             change_type,
@@ -814,26 +1292,83 @@ class Cd2UploadStrmTrigger(_PluginBase):
             full_path,
             size,
         )
+        if not destination:
+            self._log_ignored(
+                destination,
+                "文件系统事件没有有效文件路径",
+                source="filesystem",
+                status="ignored",
+            )
+            return
+        if not self._find_rule(destination):
+            self._log_non_monitor(
+                raw_dest_path=raw_path or full_path or destination,
+                path=destination,
+                source="filesystem",
+                details={
+                    "event_type": "filesystem_change",
+                    "change_type": change_name,
+                    "is_directory": is_directory,
+                },
+            )
+            return
         if not self._ready_event.is_set():
-            logger.info("【CD2 STRM触发器】监听器尚未完成基线，文件系统变更仅记录不处理")
+            self._record_event(
+                "cd2_event",
+                "INFO",
+                "文件系统变更跳过",
+                "监听器尚未完成基线，文件系统变更仅记录不处理",
+                source="filesystem",
+                status="baseline",
+                raw_dest_path=raw_path or full_path,
+                path=destination,
+                details={"change_type": change_name},
+            )
+            logger.info(
+                "【CD2 STRM触发器】【CD2事件】监听器尚未完成基线，文件系统变更仅记录不处理"
+            )
             return
         if change_type == self.FILE_DELETE:
             if not self._config.get("delete_sync"):
+                self._record_event(
+                    "delete_event",
+                    "INFO",
+                    "删除同步已跳过",
+                    "删除同步未启用",
+                    source="filesystem",
+                    status="skipped",
+                    raw_dest_path=raw_path or full_path,
+                    path=destination,
+                    details={"change_type": change_name},
+                )
                 logger.info(
-                    "【CD2 STRM触发器】删除同步未启用，跳过本地删除：path=%s",
+                    "【CD2 STRM触发器】【删除事件】删除同步未启用，跳过本地删除：path=%s",
                     destination,
                 )
                 return
             self._sync_deleted_path(destination, is_directory, size)
             return
         if change_type not in (self.FILE_CREATE, self.FILE_RENAME) or is_directory:
-            return
-        if not destination:
-            self._log_ignored(destination, "文件系统事件没有有效文件路径")
+            self._record_event(
+                "cd2_event",
+                "INFO",
+                "文件系统变更跳过",
+                "目录变更或不支持的文件变更类型不入队",
+                source="filesystem",
+                status="skipped",
+                raw_dest_path=raw_path or full_path,
+                path=destination,
+                details={"change_type": change_name, "is_directory": is_directory},
+            )
             return
         built = self._build_file_payload_from_destination(destination, size)
         if not built:
-            self._log_ignored(destination, self._payload_ignore_reason(destination))
+            self._log_ignored(
+                destination,
+                self._payload_ignore_reason(destination),
+                source="filesystem",
+                status="ignored",
+            )
             return
         kind, payload = built
         with self._state_lock:
@@ -852,16 +1387,24 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self, destination: str, is_directory: bool, size: int
     ) -> None:
         """将 CD2 删除事件同步到本地字幕、STRM 和空目录。"""
+        self._ensure_runtime_events()
         if not destination:
-            self._log_ignored(destination, "删除事件没有有效文件路径")
+            self._log_ignored(
+                destination,
+                "删除事件没有有效文件路径",
+                source="filesystem",
+                status="ignored",
+            )
             return
 
         canonical_destination = self._canonical_cd2_path(destination)
         rule = self._find_rule(canonical_destination)
         if not rule:
-            self._log_ignored(
-                destination,
-                f"删除路径未命中目录规则（规范化路径：{canonical_destination or '/'}）",
+            self._log_non_monitor(
+                raw_dest_path=destination,
+                path=canonical_destination,
+                source="filesystem",
+                details={"event_type": "delete", "change_type": "DELETE"},
             )
             return
 
@@ -870,7 +1413,21 @@ class Cd2UploadStrmTrigger(_PluginBase):
         try:
             local_target = Path(self._local_file_path(rule["local_path"], relative))
         except Exception as exc:
-            self._log_ignored(destination, f"删除路径映射失败：{exc}")
+            self._record_event(
+                "delete_event",
+                "WARNING",
+                "删除路径映射失败",
+                str(exc),
+                source="filesystem",
+                status="failed",
+                raw_dest_path=destination,
+                path=canonical_destination,
+            )
+            logger.warning(
+                "【CD2 STRM触发器】【删除事件】删除路径映射失败：cd2=%s 原因=%s",
+                canonical_destination,
+                exc,
+            )
             return
         local_root = Path(self._text(rule["local_path"])).expanduser()
 
@@ -886,7 +1443,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
             else:
                 self._record_delete_missing(canonical_destination)
                 logger.info(
-                    "【CD2 STRM触发器】删除同步：本地目录不存在或非空，未删除：cd2=%s local=%s",
+                    "【CD2 STRM触发器】【删除事件】删除同步：本地目录不存在或非空，未删除：cd2=%s local=%s",
                     canonical_destination,
                     local_target,
                 )
@@ -900,6 +1457,8 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._log_ignored(
                 destination,
                 self._payload_ignore_reason(canonical_destination),
+                source="filesystem",
+                status="ignored",
             )
             return
         kind, payload = built
@@ -915,11 +1474,24 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     target.unlink()
                     deleted.append(str(target))
             except Exception as exc:
+                with self._state_lock:
+                    self._stats["delete_sync_failure_count"] += 1
                 logger.warning(
-                    "【CD2 STRM触发器】删除同步失败：cd2=%s local=%s 原因=%s",
+                    "【CD2 STRM触发器】【删除事件】删除同步失败：cd2=%s local=%s 原因=%s",
                     canonical_destination,
                     target,
                     exc,
+                )
+                self._record_event(
+                    "delete_event",
+                    "WARNING",
+                    "删除同步失败",
+                    str(exc),
+                    source="filesystem",
+                    status="failed",
+                    raw_dest_path=destination,
+                    path=canonical_destination,
+                    details={"local_path": str(target)},
                 )
 
         removed_dirs: List[str] = []
@@ -937,7 +1509,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
         else:
             self._record_delete_missing(canonical_destination)
             logger.info(
-                "【CD2 STRM触发器】删除同步：本地未找到对应文件：kind=%s cd2=%s candidates=%s",
+                "【CD2 STRM触发器】【删除事件】删除同步：本地未找到对应文件：kind=%s cd2=%s candidates=%s",
                 kind,
                 canonical_destination,
                 ",".join(str(item) for item in targets),
@@ -995,10 +1567,21 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._stats["last_delete_path"] = canonical_destination
             self._stats["last_delete_local_paths"] = local_paths
         logger.info(
-            "【CD2 STRM触发器】删除同步成功：kind=%s cd2=%s local=%s",
+            "【CD2 STRM触发器】【删除事件】删除同步成功：kind=%s cd2=%s local=%s",
             kind,
             canonical_destination,
             ",".join(local_paths),
+        )
+        self._record_event(
+            "delete_event",
+            "INFO",
+            "删除同步成功",
+            "本地文件或空目录已删除",
+            source="filesystem",
+            status="success",
+            raw_dest_path=canonical_destination,
+            path=canonical_destination,
+            details={"kind": kind, "local_paths": local_paths},
         )
 
     def _record_delete_missing(self, canonical_destination: str) -> None:
@@ -1008,6 +1591,20 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._stats["last_delete_at"] = self._now()
             self._stats["last_delete_path"] = canonical_destination
             self._stats["last_delete_local_paths"] = []
+        self._record_event(
+            "delete_event",
+            "INFO",
+            "删除目标未找到",
+            "本地没有对应文件或目录",
+            source="filesystem",
+            status="not_found",
+            raw_dest_path=canonical_destination,
+            path=canonical_destination,
+        )
+        logger.info(
+            "【CD2 STRM触发器】【删除事件】删除同步未找到本地目标：cd2=%s",
+            canonical_destination,
+        )
 
     def _enqueue_payload(
         self,
@@ -1018,6 +1615,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
         source: str,
     ) -> bool:
         """将媒体或字幕任务入队，并抑制推送/文件变更双通道造成的重复。"""
+        self._ensure_runtime_events()
         now = time.monotonic()
         signature = self._payload_signature(kind, payload)
         with self._pending_lock:
@@ -1027,11 +1625,15 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 if now - item_time < self.PAYLOAD_DEDUP_SECONDS
             }
             if persist_key and key in self._processed_keys:
-                logger.info("【CD2 STRM触发器】任务已处理，跳过：source=%s key=%s", source, key)
+                logger.info(
+                    "【CD2 STRM触发器】【生成事件】任务已处理，跳过：source=%s key=%s",
+                    source,
+                    key,
+                )
                 return False
             if signature in self._recent_payloads:
                 logger.info(
-                    "【CD2 STRM触发器】推送/文件变更重复事件跳过：source=%s path=%s",
+                    "【CD2 STRM触发器】【生成事件】推送/文件变更重复事件跳过：source=%s path=%s",
                     source,
                     payload.get("cd2_path") or payload.get("raw_dest_path") or signature,
                 )
@@ -1059,8 +1661,21 @@ class Cd2UploadStrmTrigger(_PluginBase):
             target_queue[key] = item
             self._recent_payloads[signature] = now
         self._update_pending_count()
+        category = "subtitle_event" if kind == "subtitle" else "generate_event"
+        self._record_event(
+            category,
+            "INFO",
+            "字幕任务入队" if kind == "subtitle" else "STRM 生成任务入队",
+            "任务已加入处理队列",
+            source=source,
+            status="queued",
+            raw_dest_path=payload.get("raw_dest_path", ""),
+            path=payload.get("cd2_path") or payload.get("pan_path", ""),
+            details={"kind": kind, "key": key},
+        )
         logger.info(
-            "【CD2 STRM触发器】任务入队：kind=%s source=%s path=%s raw_destPath=%s",
+            "【CD2 STRM触发器】【%s】任务入队：kind=%s source=%s path=%s raw_destPath=%s",
+            "字幕事件" if kind == "subtitle" else "生成事件",
             kind,
             source,
             payload.get("cd2_path") or payload.get("pan_path"),
@@ -1077,14 +1692,276 @@ class Cd2UploadStrmTrigger(_PluginBase):
         size = int(payload.get("size", 0) or 0)
         return f"{kind}|{path}|{size}"
 
-    def _log_ignored(self, destination: str, reason: str) -> None:
-        """记录未命中规则或扩展名的任务，避免“没有日志”难以排查。"""
+    def _ensure_runtime_events(self) -> None:
+        """为正常实例和 object.__new__ 纯逻辑测试实例补齐事件运行时状态。"""
+        if not hasattr(self, "_state_lock"):
+            self._state_lock = threading.RLock()
+        if not hasattr(self, "_history_lock"):
+            self._history_lock = threading.RLock()
+        if not hasattr(self, "_event_history"):
+            self._event_history = deque(maxlen=self.EVENT_HISTORY_LIMIT)
+        if not hasattr(self, "_event_sequence"):
+            self._event_sequence = 0
+        if not hasattr(self, "_last_push_upload_count"):
+            self._last_push_upload_count = None
+        if not hasattr(self, "_manual_scan_event"):
+            self._manual_scan_event = threading.Event()
+        if not hasattr(self, "_wake_event"):
+            self._wake_event = threading.Event()
+        if not hasattr(self, "_rapid_rescan_event"):
+            self._rapid_rescan_event = threading.Event()
+        if not hasattr(self, "_ready_event"):
+            self._ready_event = threading.Event()
+        if not hasattr(self, "_stop_event"):
+            self._stop_event = threading.Event()
+        if not hasattr(self, "_pending_lock"):
+            self._pending_lock = threading.RLock()
+        if not hasattr(self, "_task_states"):
+            self._task_states = {}
+        if not hasattr(self, "_pending"):
+            self._pending = {}
+        if not hasattr(self, "_subtitle_pending"):
+            self._subtitle_pending = {}
+        if not hasattr(self, "_processed_keys"):
+            self._processed_keys = set()
+        if not hasattr(self, "_recent_payloads"):
+            self._recent_payloads = {}
+        if not hasattr(self, "_subtitle_wake_event"):
+            self._subtitle_wake_event = threading.Event()
+        if not hasattr(self, "_push_buffer_lock"):
+            self._push_buffer_lock = threading.RLock()
+        if not hasattr(self, "_push_dispatch_lock"):
+            self._push_dispatch_lock = threading.RLock()
+        if not hasattr(self, "_push_buffer"):
+            self._push_buffer = deque(maxlen=1000)
+        if not hasattr(self, "_stats"):
+            self._stats = self._new_stats()
+
+    @classmethod
+    def _event_text(cls, value: Any, secrets: Iterable[str] = ()) -> str:
+        """将事件文本脱敏，避免把 Token 或 API 密钥写入历史。"""
+        result = cls._text(value)
+        for secret in secrets:
+            secret_text = cls._text(secret)
+            if secret_text:
+                result = result.replace(secret_text, "***")
+        return result
+
+    def _sanitize_event_value(self, value: Any, key: str = "") -> Any:
+        """递归清理事件详情中的凭据字段和值。"""
+        sensitive_key = any(
+            marker in self._text(key).lower()
+            for marker in (
+                "token",
+                "authorization",
+                "apikey",
+                "api_key",
+                "password",
+                "cookie",
+                "secret",
+            )
+        )
+        if sensitive_key:
+            return "***"
+        secrets = (
+            self._config.get("cd2_token", "") if hasattr(self, "_config") else "",
+            self._config.get("moviepilot_api_key", "")
+            if hasattr(self, "_config")
+            else "",
+        )
+        if isinstance(value, dict):
+            return {
+                str(item_key): self._sanitize_event_value(item_value, str(item_key))
+                for item_key, item_value in value.items()
+                if not any(
+                    marker in self._text(item_key).lower()
+                    for marker in (
+                        "token",
+                        "authorization",
+                        "apikey",
+                        "api_key",
+                        "password",
+                        "cookie",
+                        "secret",
+                    )
+                )
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [self._sanitize_event_value(item) for item in value]
+        if isinstance(value, Path):
+            return self._event_text(str(value), secrets)
+        if isinstance(value, str):
+            return self._event_text(value, secrets)
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return self._event_text(value, secrets)
+
+    def _record_event(
+        self,
+        category: str,
+        level: str,
+        title: str,
+        message: str = "",
+        *,
+        source: str = "",
+        status: str = "",
+        raw_dest_path: Any = "",
+        path: Any = "",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """写入线程安全的分类事件历史，并输出带分类标签的日志。"""
+        self._ensure_runtime_events()
+        event_level = self._text(level).upper() or "INFO"
+        secrets = (
+            self._config.get("cd2_token", "") if hasattr(self, "_config") else "",
+            self._config.get("moviepilot_api_key", "")
+            if hasattr(self, "_config")
+            else "",
+        )
+        safe_title = self._event_text(title, secrets)
+        safe_message = self._event_text(message or title, secrets)
+        safe_source = self._event_text(source, secrets)
+        safe_status = self._event_text(status, secrets)
+        safe_raw = self._sanitize_event_value(raw_dest_path, "raw_dest_path")
+        safe_path = self._sanitize_event_value(path, "path")
+        safe_details = self._sanitize_event_value(details or {})
+        with self._history_lock:
+            self._event_sequence += 1
+            event = {
+                "id": self._event_sequence,
+                "at": self._now(),
+                "category": self._text(category) or "cd2_event",
+                "level": event_level,
+                "title": safe_title,
+                "message": safe_message,
+                "source": safe_source,
+                "status": safe_status,
+                "raw_dest_path": safe_raw,
+                "path": safe_path,
+                "details": safe_details,
+            }
+            self._event_history.append(event)
+        with self._state_lock:
+            counts = self._stats.setdefault("event_counts", {})
+            counts[event["category"]] = int(counts.get(event["category"], 0) or 0) + 1
+            self._stats["event_history"] = self._event_history_snapshot(
+                self.EVENT_HISTORY_LIMIT
+            )
+        label = self.EVENT_CATEGORY_LABELS.get(event["category"], "CD2事件")
+        log_text = f"【CD2 STRM触发器】【{label}】{safe_title}：{safe_message}"
+        if event_level in {"ERROR", "WARNING"}:
+            log_method = getattr(logger, "warning", logger.info)
+        else:
+            log_method = logger.info
+        log_method(log_text)
+        return event
+
+    def _event_history_snapshot(self, limit: int = EVENT_HISTORY_PAGE_SIZE) -> List[Dict[str, Any]]:
+        """返回最近事件的副本，默认只供页面显示最近十条。"""
+        self._ensure_runtime_events()
+        try:
+            requested = max(1, int(limit))
+        except (TypeError, ValueError):
+            requested = self.EVENT_HISTORY_PAGE_SIZE
+        with self._history_lock:
+            events = list(self._event_history)[-requested:]
+        return [dict(item, details=dict(item.get("details") or {})) for item in events]
+
+    def _register_cd2_received(
+        self,
+        title: str,
+        message: str,
+        *,
+        source: str,
+        status: str,
+        raw_dest_path: Any = "",
+        path: Any = "",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """统计所有收到的上传任务/文件系统事件并写入 CD2 分类历史。"""
+        self._ensure_runtime_events()
+        with self._state_lock:
+            self._stats["cd2_event_count"] += 1
+            self._stats["cd2_received_count"] += 1
+            self._stats["received_event_count"] += 1
+            event_stats = self._stats.setdefault("event_stats", {})
+            event_stats["received"] = int(event_stats.get("received", 0) or 0) + 1
+        return self._record_event(
+            "cd2_event",
+            "INFO",
+            title,
+            message,
+            source=source,
+            status=status,
+            raw_dest_path=raw_dest_path,
+            path=path,
+            details=details,
+        )
+
+    def _log_ignored(
+        self,
+        destination: str,
+        reason: str,
+        *,
+        source: str = "",
+        status: str = "ignored",
+    ) -> None:
+        """记录命中监控目录但被扩展名等条件过滤的任务。"""
+        self._ensure_runtime_events()
         with self._state_lock:
             self._stats["ignored_count"] += 1
+            self._stats["ignored_event_count"] += 1
+            event_stats = self._stats.setdefault("event_stats", {})
+            event_stats["ignored"] = int(event_stats.get("ignored", 0) or 0) + 1
+        self._record_event(
+            "cd2_event",
+            "INFO",
+            "CD2 事件已忽略",
+            reason,
+            source=source,
+            status=status,
+            raw_dest_path=destination,
+            path=destination,
+            details={"reason": reason},
+        )
         logger.info(
-            "【CD2 STRM触发器】任务忽略：raw destPath=%s；原因=%s",
+            "【CD2 STRM触发器】【CD2事件】任务忽略：raw destPath=%s；原因=%s",
             destination,
             reason,
+        )
+
+    def _log_non_monitor(
+        self,
+        *,
+        raw_dest_path: Any,
+        path: Any,
+        source: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """记录未命中启用目录规则的事件，不进入任何处理队列也不报错。"""
+        self._ensure_runtime_events()
+        with self._state_lock:
+            self._stats["ignored_count"] += 1
+            self._stats["ignored_event_count"] += 1
+            self._stats["non_monitor_count"] += 1
+            event_stats = self._stats.setdefault("event_stats", {})
+            event_stats["ignored"] = int(event_stats.get("ignored", 0) or 0) + 1
+            event_stats["non_monitor"] = int(event_stats.get("non_monitor", 0) or 0) + 1
+        self._record_event(
+            "cd2_event",
+            "INFO",
+            "非监控目录事件已忽略",
+            "路径未命中启用的目录规则，未进入处理队列",
+            source=source,
+            status="ignored",
+            raw_dest_path=raw_dest_path,
+            path=path,
+            details=details or {},
+        )
+        logger.info(
+            "【CD2 STRM触发器】【CD2事件】非监控目录事件已忽略：raw_path=%s path=%s",
+            raw_dest_path,
+            path,
         )
 
     @staticmethod
@@ -1373,7 +2250,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
             )
         if samples[1] > 0 and int(payload.get("size", 0) or 0) != samples[1]:
             logger.info(
-                "【CD2 STRM触发器】字幕任务大小已更新：task=%s，CD2=%s，使用 CD2 最新大小",
+                "【CD2 STRM触发器】【字幕事件】字幕任务大小已更新：task=%s，CD2=%s，使用 CD2 最新大小",
                 payload.get("size", 0),
                 samples[1],
             )
@@ -1424,9 +2301,31 @@ class Cd2UploadStrmTrigger(_PluginBase):
                 self._pending.pop(key, None)
         self._update_pending_count()
         payloads = [item["payload"] for _, item in selected]
+        self._record_event(
+            "generate_event",
+            "INFO",
+            "提交 STRM 生成任务",
+            "批量提交 115 STRM 增量生成接口",
+            source="dispatch",
+            status="submitted",
+            details={"count": len(payloads)},
+        )
+        logger.info(
+            "【CD2 STRM触发器】【生成事件】提交 115 STRM 生成任务：数量=%s",
+            len(payloads),
+        )
         try:
             result = self._call_p115_api(payloads)
-        except Exception:
+        except Exception as exc:
+            self._record_event(
+                "generate_event",
+                "WARNING",
+                "STRM 生成提交失败",
+                str(exc),
+                source="dispatch",
+                status="failed",
+                details={"count": len(payloads)},
+            )
             with self._pending_lock:
                 for key, item in selected:
                     attempts = int(item.get("attempts", 0)) + 1
@@ -1436,7 +2335,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
                         self._pending[key] = item
                     else:
                         logger.error(
-                            "【CD2 STRM触发器】115 STRM API 连续失败，停止自动重试：%s",
+                            "【CD2 STRM触发器】【生成事件】115 STRM API 连续失败，停止自动重试：%s",
                             item["payload"].get("pan_path", key),
                         )
             self._update_pending_count()
@@ -1461,7 +2360,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
                         self._pending[key] = item
                     else:
                         logger.error(
-                            "【CD2 STRM触发器】任务连续失败，停止自动重试：%s",
+                            "【CD2 STRM触发器】【生成事件】任务连续失败，停止自动重试：%s",
                             item["payload"].get("pan_path", key),
                         )
             self._update_pending_count()
@@ -1478,6 +2377,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
         """将媒体、字幕或删除事件加入同一个 Emby 刷新防抖窗口。"""
         if not self._config.get("media_server_refresh"):
             return
+        self._ensure_runtime_events()
         now = time.monotonic()
         delay = float(self._config.get("emby_refresh_debounce", 5.0))
         with self._emby_refresh_lock:
@@ -1489,8 +2389,17 @@ class Cd2UploadStrmTrigger(_PluginBase):
         with self._state_lock:
             self._stats["emby_refresh_pending_count"] = pending_count
         self._emby_refresh_wake_event.set()
+        self._record_event(
+            "refresh_event",
+            "INFO",
+            "Emby 刷新入队",
+            "事件已加入 Emby 防抖刷新队列",
+            source="emby_debounce",
+            status="queued",
+            details={"reason": reason, "item_count": pending_count, "delay": delay},
+        )
         logger.info(
-            "【CD2 STRM触发器】Emby 刷新加入防抖队列：reason=%s，累计文件/事件=%s，等待=%s 秒",
+            "【CD2 STRM触发器】【刷新事件】Emby 刷新加入防抖队列：reason=%s，累计文件/事件=%s，等待=%s 秒",
             reason,
             pending_count,
             delay,
@@ -1537,6 +2446,16 @@ class Cd2UploadStrmTrigger(_PluginBase):
         """通过 MoviePilot 已配置的 Emby 服务执行一次批次刷新。"""
         if not self._config.get("media_server_refresh"):
             return
+        self._ensure_runtime_events()
+        self._record_event(
+            "refresh_event",
+            "INFO",
+            "Emby 刷新开始",
+            "开始获取已配置的 Emby 服务",
+            source="emby",
+            status="started",
+            details={"item_count": item_count, "reasons": reasons},
+        )
 
         try:
             services = MediaServerHelper().get_services(type_filter="emby")
@@ -1544,19 +2463,37 @@ class Cd2UploadStrmTrigger(_PluginBase):
             message = f"获取 MoviePilot Emby 服务失败：{exc}"
             with self._state_lock:
                 self._stats["last_emby_refresh_error"] = message
-            logger.warning("【CD2 STRM触发器】%s", message)
+            self._record_event(
+                "refresh_event",
+                "WARNING",
+                "Emby 刷新失败",
+                message,
+                source="emby",
+                status="failed",
+                details={"item_count": item_count, "reasons": reasons},
+            )
+            logger.warning("【CD2 STRM触发器】【刷新事件】%s", message)
             return
 
         if not services:
             message = "MoviePilot 未找到已配置的 Emby 服务，跳过批次刷新"
             with self._state_lock:
                 self._stats["last_emby_refresh_error"] = message
-            logger.warning("【CD2 STRM触发器】%s", message)
+            self._record_event(
+                "refresh_event",
+                "INFO",
+                "Emby 刷新跳过",
+                message,
+                source="emby",
+                status="skipped",
+                details={"item_count": item_count, "reasons": reasons},
+            )
+            logger.info("【CD2 STRM触发器】【刷新事件】%s", message)
             return
 
         server_names = list(services.keys())
         logger.info(
-            "【CD2 STRM触发器】开始 Emby 批次刷新：累计文件/事件=%s，原因=%s，目标服务器=%s；每个服务器本批仅请求一次",
+            "【CD2 STRM触发器】【刷新事件】开始 Emby 批次刷新：累计文件/事件=%s，原因=%s，目标服务器=%s；每个服务器本批仅请求一次",
             item_count,
             reasons,
             ",".join(server_names),
@@ -1578,23 +2515,36 @@ class Cd2UploadStrmTrigger(_PluginBase):
                     errors.append(f"{name}:不支持 Emby 刷新接口")
                     continue
                 request_count += 1
+                self._record_event(
+                    "refresh_event",
+                    "INFO",
+                    "Emby 刷新请求",
+                    "向 Emby 发送库刷新请求",
+                    source="emby",
+                    status="requested",
+                    details={"server": name, "item_count": item_count},
+                )
                 if refresh():
                     refreshed_servers.append(name)
                     logger.info(
-                        "【CD2 STRM触发器】Emby 批次刷新请求已发送：server=%s，累计文件/事件=%s",
+                        "【CD2 STRM触发器】【刷新事件】Emby 批次刷新请求已发送：server=%s，累计文件/事件=%s",
                         name,
                         item_count,
                     )
                 else:
                     errors.append(f"{name}:Emby API 返回失败")
                     logger.warning(
-                        "【CD2 STRM触发器】Emby 批次刷新失败：server=%s，累计文件/事件=%s",
+                        "【CD2 STRM触发器】【刷新事件】Emby 批次刷新失败：server=%s，累计文件/事件=%s",
                         name,
                         item_count,
                     )
             except Exception as exc:
                 errors.append(f"{name}:{exc}")
-                logger.warning("【CD2 STRM触发器】Emby 批次刷新异常：server=%s，原因=%s", name, exc)
+                logger.warning(
+                    "【CD2 STRM触发器】【刷新事件】Emby 批次刷新异常：server=%s，原因=%s",
+                    name,
+                    exc,
+                )
 
         with self._state_lock:
             self._stats["emby_refresh_batch_count"] += 1
@@ -1603,14 +2553,42 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._stats["last_emby_refresh_servers"] = refreshed_servers
             self._stats["last_emby_refresh_error"] = "; ".join(errors)
         if errors:
+            self._record_event(
+                "refresh_event",
+                "WARNING",
+                "Emby 刷新失败",
+                "Emby 批次刷新存在失败项",
+                source="emby",
+                status="failed",
+                details={
+                    "item_count": item_count,
+                    "reasons": reasons,
+                    "servers": refreshed_servers,
+                    "errors": errors,
+                },
+            )
             logger.warning(
-                "【CD2 STRM触发器】Emby 批次刷新部分失败：成功=%s，失败=%s",
+                "【CD2 STRM触发器】【刷新事件】Emby 批次刷新部分失败：成功=%s，失败=%s",
                 ",".join(refreshed_servers) or "无",
                 "; ".join(errors),
             )
         else:
+            self._record_event(
+                "refresh_event",
+                "INFO",
+                "Emby 刷新完成",
+                "Emby 批次刷新请求完成",
+                source="emby",
+                status="completed",
+                details={
+                    "item_count": item_count,
+                    "reasons": reasons,
+                    "servers": refreshed_servers,
+                    "request_count": request_count,
+                },
+            )
             logger.info(
-                "【CD2 STRM触发器】Emby 批次刷新完成：累计文件/事件=%s，API请求=%s",
+                "【CD2 STRM触发器】【刷新事件】Emby 批次刷新完成：累计文件/事件=%s，API请求=%s",
                 item_count,
                 request_count,
             )
@@ -1678,6 +2656,7 @@ class Cd2UploadStrmTrigger(_PluginBase):
         self, result: Dict[str, Any], success_count: int, failed_count: int
     ) -> None:
         """记录本次 115 STRM API 调用结果并按需发送通知。"""
+        self._ensure_runtime_events()
         data = result.get("data") if isinstance(result.get("data"), dict) else result
         summary = {
             "success_count": int(data.get("success_count", success_count) or 0),
@@ -1689,6 +2668,45 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._stats["last_trigger_at"] = self._now()
             self._stats["last_trigger"] = summary
             self._stats["last_error"] = "" if not failed_count else "部分文件生成 STRM 失败，已进入重试"
+            self._stats.setdefault("metadata_success_count", 0)
+            self._stats.setdefault("metadata_fail_count", 0)
+            self._stats["metadata_success_count"] += summary["download_success_count"]
+            self._stats["metadata_fail_count"] += summary["download_fail_count"]
+            self._stats["last_metadata_at"] = self._now()
+            self._stats["last_metadata_result"] = {
+                "success_count": summary["download_success_count"],
+                "fail_count": summary["download_fail_count"],
+            }
+        self._record_event(
+            "generate_event",
+            "WARNING" if failed_count else "INFO",
+            "STRM 生成失败" if failed_count else "STRM 生成成功",
+            (
+                "部分文件生成失败，已进入有限重试"
+                if failed_count
+                else "115 STRM 增量生成完成"
+            ),
+            source="p115_api",
+            status="partial_failed" if failed_count else "success",
+            details=summary,
+        )
+        if any(
+            key in data
+            for key in ("download_success_count", "download_fail_count")
+        ):
+            metadata_failed = bool(summary["download_fail_count"])
+            self._record_event(
+                "metadata_event",
+                "WARNING" if metadata_failed else "INFO",
+                "元数据下载失败" if metadata_failed else "元数据下载完成",
+                "115 助手返回媒体元数据下载结果",
+                source="p115_api",
+                status="failed" if metadata_failed else "success",
+                details={
+                    "success_count": summary["download_success_count"],
+                    "fail_count": summary["download_fail_count"],
+                },
+            )
         if self._config.get("notify"):
             self.post_message(
                 mtype=NotificationType.Plugin,
@@ -1745,13 +2763,36 @@ class Cd2UploadStrmTrigger(_PluginBase):
 
     def _status_snapshot(self) -> Dict[str, Any]:
         """生成供前端显示的线程安全状态快照。"""
+        self._ensure_runtime_events()
         with self._state_lock:
             snapshot = dict(self._stats)
+            snapshot["event_counts"] = dict(self._stats.get("event_counts") or {})
+            snapshot["event_stats"] = dict(self._stats.get("event_stats") or {})
+            snapshot["last_trigger"] = dict(self._stats.get("last_trigger") or {})
+            snapshot["last_metadata_result"] = dict(
+                self._stats.get("last_metadata_result") or {}
+            )
+        # 状态返回完整的内存窗口，由现有前端按时间倒序展示最近十条。
+        snapshot["event_history"] = self._event_history_snapshot(self.EVENT_HISTORY_LIMIT)
+        with self._history_lock:
+            snapshot["event_history_count"] = len(self._event_history)
         snapshot["rule_count"] = len(self._config.get("rules", []))
         snapshot["has_cd2_token"] = bool(self._config.get("cd2_token"))
         snapshot["has_moviepilot_api_key"] = bool(
             self._config.get("moviepilot_api_key") or getattr(settings, "API_TOKEN", "")
         )
+        snapshot["push_primary"] = True
+        snapshot["poll_fallback_enabled"] = bool(
+            self._config.get("poll_fallback_enabled")
+        )
+        snapshot["non_monitor"] = int(snapshot.get("non_monitor_count", 0) or 0)
+        snapshot["ignored"] = int(snapshot.get("ignored_count", 0) or 0)
+        snapshot["last_scan"] = {
+            "source": snapshot.get("last_scan_source", ""),
+            "at": snapshot.get("last_scan_at", ""),
+            "upload_count": snapshot.get("last_scan_upload_count", 0),
+            "task_count": snapshot.get("last_scan_task_count", 0),
+        }
         return snapshot
 
     @staticmethod
@@ -1759,17 +2800,36 @@ class Cd2UploadStrmTrigger(_PluginBase):
         """返回当前本地时间文本。"""
         return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
-    def _set_error(self, message: str) -> None:
+    def _set_error(
+        self,
+        message: str,
+        *,
+        category: str = "cd2_event",
+        source: str = "runtime",
+    ) -> None:
         """记录错误状态并写入 MoviePilot 日志。"""
+        self._ensure_runtime_events()
+        safe_message = self._event_text(message)
         with self._state_lock:
             self._stats["connected"] = False
-            self._stats["last_error"] = message
-        logger.warning("【CD2 STRM触发器】%s", message)
+            self._stats["last_error"] = safe_message
+        self._record_event(
+            category,
+            "WARNING",
+            "插件处理失败",
+            safe_message,
+            source=source,
+            status="failed",
+        )
+        label = self.EVENT_CATEGORY_LABELS.get(category, "CD2事件")
+        logger.warning("【CD2 STRM触发器】【%s】%s", label, safe_message)
 
     def stop_service(self):
         """停止后台线程、关闭 CD2 推送连接并释放资源。"""
         self._stop_event.set()
         self._wake_event.set()
+        if hasattr(self, "_manual_scan_event"):
+            self._manual_scan_event.set()
         if hasattr(self, "_subtitle_wake_event"):
             self._subtitle_wake_event.set()
         if hasattr(self, "_emby_refresh_wake_event"):
@@ -1793,3 +2853,4 @@ class Cd2UploadStrmTrigger(_PluginBase):
             self._emby_refresh_wake_event.clear()
         with self._state_lock:
             self._stats["running"] = False
+            self._stats["push_connected"] = False

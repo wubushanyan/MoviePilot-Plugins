@@ -1,59 +1,93 @@
 # CD2 上传触发 115 STRM
 
-这个插件监听 CloudDrive2 的上传任务，在插件启动完成第一次状态扫描后，只有新上传或新建的文件才会处理：媒体文件调用 `P115StrmHelper` 的文件级 STRM API，字幕文件由本插件从 CD2 下载到本地；可选地由本插件统一刷新 Emby，并把 CD2 删除同步到本地。
+前端与市场元数据版本：`v0.8.0`。
+
+插件监听 CloudDrive2 的上传任务和文件变更：媒体文件交给 `P115StrmHelper` 生成增量 STRM，字幕文件由本插件从 CD2 下载到本地；可选统一刷新 Emby、同步删除和发送生成结果通知。状态页会保留最近至少 10 条分类事件，设置页按功能拆分为多个子页。
+
+## 设置页导航
+
+设置页分为五个子页，可用顶部页签或“上一页 / 下一页”切换，避免所有选项堆在一张长表单中：
+
+1. **连接与监听**：CD2/MoviePilot 地址、令牌、启用开关、Push 主触发和轮询兜底。
+2. **目录规则**：规则增删和 CD2 → 115 → 本地三段路径映射。
+3. **文件与限速**：批处理、分页、媒体/字幕扩展名、字幕下载间隔和稳定等待。
+4. **生成后动作**：刮削、媒体元数据下载、通知、Emby 刷新防抖和删除同步。
+5. **使用说明**：流程、路径、权限和动作归属的内置说明。
+
+保存、关闭、测试连接、手动测试和规则增删仍保留；令牌输入使用密码控件，不在页面中硬编码令牌或主机敏感信息。
+
+## 监听策略
+
+- `PushMessage` 是主触发方式，包含 `UPLOADER_COUNT`、`uploadFileStatusChanges` 和文件系统 CREATE/RENAME 事件。
+- `poll_fallback_enabled` 默认关闭。启动时只建立一次状态基线，Push 为主，只有数量变化按需补扫、手动检查或开启兜底时才轮询；开启兜底后才使用 `GetUploadFileCount` / `GetUploadFileList` 做断线补偿。
+- 关闭轮询兜底不会关闭 Push，也不会把启动前已经是 `Finish` 的任务重新处理；后续新变为 `Finish` 且命中目录规则的文件才会进入处理流程。
+- 上传数量变化会触发多次快速补扫，降低小文件在监听间隔内完成而漏掉的概率；任务键会持久化，STRM 单批最多提交 100 个文件。
 
 ## 目录规则
 
-每条规则包含三段，三段必须是同一相对目录结构的映射：
+每条规则包含三段，三段保持同一相对目录结构：
 
 ```text
 CD2 目标目录前缀 -> 115 网盘路径前缀 -> 本地 STRM 根目录
 ```
 
-例如：
+推荐示例：
 
 ```text
-/CloudNAS/115/影视库 -> /影视库 -> /media/MP_movieDB/影视库
+/影视库（对应 CD2 目标 /115/影视库） -> /影视库 -> /media/MP_movieDB/影视库
 ```
 
-前端会分别填写这三个字段。插件会使用 `destPath` 相对于 CD2 前缀的相对路径构造 `pan_path`；STRM 和字幕都按这个相对路径放置。
-
-- `CD2 目标目录前缀`：CloudDrive2 上传任务 `destPath` 的监控范围，只匹配该目录及子目录。支持挂载路径、源目录路径和 API 路径，例如 `/CloudNAS/115/影视库`、`/115/影视库`、`/影视库` 会按同一目录匹配。
-- `115 网盘路径前缀`：115 网盘媒体库根目录，用于构造 STRM 请求里的 `pan_path`。
-- `本地 STRM 根目录`：MoviePilot/Emby 能看到的本地媒体根目录，STRM 和字幕下载到这里。
-- 本地目录不存在时：媒体 STRM 生成和字幕下载都会按映射自动创建需要的父目录；如果本地根目录不可写、路径映射无效或 Emby 看不到该路径，才会在日志中报错。
-- `CD2 API 根目录`：填写 CD2 API Token 的 `RootDirectory`，本例为 `/115`。插件会自动去掉这个根目录后调用 CD2 文件 API。
+- **CD2 目标目录前缀**：`destPath` 的监控范围，只匹配该目标目录及子目录；支持挂载路径、目标路径和 API 路径归一化，例如 `/CloudNAS/115/影视库`、`/115/影视库`、`/影视库`。CD2 备份源 `/Sort` 不属于插件监控前缀。
+- **115 网盘路径前缀**：用于构造 STRM 请求的 `pan_path`，例如 `/影视库`；这里填写 115 助手使用的网盘相对路径，不要把 CD2 Token 的 `/115` 根目录再次拼进去。
+- **本地 STRM 根目录**：MoviePilot/Emby 读取 STRM 和字幕的本地根目录，两类文件按相同相对目录落盘。
 
 例如：
 
 ```text
-CD2:   /CloudNAS/115/影视库/电影/a.mkv
+CD2:   /115/影视库/电影/a.mkv（/Sort 是备份源目录）
 115:   /影视库/电影/a.mkv
-本地:  /media/MP_movieDB/影视库/电影/a.mkv 对应的 STRM/字幕位置
+本地:  /media/MP_movieDB/影视库/电影/a.strm 与对应字幕
 ```
 
-## 监听策略
+`/Sort` 源文件删除属于非监控事件，已忽略，不会显示为错误；只有监控目录中的删除事件才会按 `delete_sync` 开关同步本地 STRM/字幕。
 
-- `PushMessage` 中的 `UPLOADER_COUNT` 和 `uploadFileStatusChanges` 用于快速响应，`operatorType=RemoteUpload`（网页/公网远程上传）不再依赖局域网挂载路径。
-- `PushMessage` 中的 `FILE_SYSTEM_CHANGE` 的 CREATE/RENAME 文件事件也会直接进入处理流程，用来捕获已经从上传任务列表消失的瞬时文件。
-- `GetUploadFileCount` 和 `GetUploadFileList` 按轮询间隔执行，用于断线补偿。
-- 每次收到上传数量变化会额外执行 0.2、0.6、1.2、2.5 秒快速补扫，降低小文件在轮询间隔内完成而漏掉的概率。
-- 启动后的第一次成功扫描固定只建立状态基线，扫描到的已有 `Finish` 任务不会处理；后续新出现的完成状态才会触发。
-- 媒体扩展名默认用于生成 STRM；字幕扩展名默认为 `srt,ssa,ass,vtt,sub,idx,sup`，只下载字幕，不生成 STRM。
-- 字幕由独立单线程按“字幕下载间隔”串行处理，默认先等待 3 秒，再连续读取两次 CD2 文件大小确认稳定后下载；失败最多自动重试 3 次。
-- 任务键会持久化，STRM 单批最多提交 100 个文件。
+## 状态页与事件历史
 
-插件日志会记录 `messageType`、原始 `destPath`、`operatorType`（包括 `RemoteUpload`）、`statusEnum`、路径匹配结果和入队结果；排查时搜索 `CD2 STRM触发器` 即可。
+状态页分为“总览 / 事件 / 说明”：
 
-## 生成后的动作由谁执行
+- **总览**：连接和监听模式、任务/队列/处理统计、最近 CD2 事件、生成、元数据、字幕、删除同步、Emby 刷新和错误摘要。主要卡片都提供“去设置”。
+- **事件**：从后端 `event_history` 按时间倒序显示最近 10 条，分类使用中文标签和颜色。支持 `cd2_event`、`generate_event`、`delete_event`、`refresh_event`、`metadata_event`、`subtitle_event`。
+- **事件详情**：点击事件即可折叠/展开，查看 `id`、`at`、`category`、`level`、`title`、`message`、`source`、`status`、原始 `raw_dest_path`、规范化 `path` 和 `details`，并可直接去设置。
 
-- `由 115 STRM 助手刮削元数据`：由 115 STRM 助手调用 MoviePilot 的元数据刮削链路执行，不是 Emby MediaInfoKeeper。
-- `由本插件刷新 Emby（媒体/字幕/删除，防抖）`：不再把刷新开关交给 115 STRM 助手。媒体 STRM 生成成功、外挂字幕下载成功或删除同步成功后，事件会进入同一个 Emby 刷新防抖窗口；窗口结束后，本插件通过 MoviePilot 已配置的 Emby 服务，每个 Emby 发送一次 `Library/Refresh` 请求。字幕和媒体在窗口内会合并，不会按文件逐个请求。
-- `同步 CD2 删除到本地`：开启后，CD2 监控目录内的文件删除会删除本地对应字幕或 STRM；目录仅在确实为空时才会被逐级删除，不会递归删除目录中的其他文件。此开关默认关闭。
-- `由 115 STRM 助手下载 .nfo/.jpg 等媒体元数据`：由 115 STRM 助手的 MediaInfoDownloader 按自身 `user_download_mediaext` 配置执行。本插件不会把字幕任务提交给这个流程，因此与本插件字幕下载不冲突。
-- `发送 STRM 生成结果通知`：本插件调用 MoviePilot 的 `post_message`，使用 MoviePilot 已配置的通知渠道，例如 Telegram；字幕下载不会逐个发送通知。
-- 本插件的字幕下载与 115 助手的“媒体元数据下载”是两条独立流程。如果 115 助手也配置了字幕扩展名，可能重复下载，建议字幕只由本插件负责。
+## 生成、字幕、Emby 和删除
 
-## CD2 Token 权限
+- **媒体生成**：媒体扩展名命中后调用 115 STRM 助手，不下载原媒体文件；助手可按自身配置刮削和下载 `.nfo`、图片等媒体元数据。
+- **字幕下载**：默认扩展名为 `srt,ssa,ass,vtt,sub,idx,sup`，独立单线程串行下载；按“字幕下载间隔”限速，并在下载前等待、连续读取两次文件大小确认稳定，失败按后端策略重试。
+- **Emby 刷新**：开启后，媒体 STRM 生成成功、字幕下载成功或删除同步成功都会进入同一个防抖窗口；窗口结束后每个已配置 Emby 只发送一次刷新请求。
+- **删除同步**：默认关闭。开启后仅删除监控目录中对应的本地字幕/STRM，并逐级清理确实为空的目录，不递归删除其他文件。
+- **通知**：由本插件调用 MoviePilot 已配置的通知渠道发送批次结果，不逐个发送字幕通知。
 
-监听任务需要“获取传输任务”和“接收推送消息”；下载字幕还需要文件读取相关权限，包括列出文件、读取文件/查看属性，以及对应的 HTTP 下载能力。
+## 配置字段
+
+配置字段保持兼容：
+
+```text
+enabled, cd2_endpoint, cd2_token, cd2_api_root, moviepilot_url,
+moviepilot_api_key, rules[], poll_interval, batch_window, page_size,
+poll_fallback_enabled, include_extensions, subtitle_extensions,
+subtitle_interval, subtitle_stability_delay, emby_refresh_debounce,
+delete_sync, scrape_metadata, media_server_refresh,
+auto_download_mediainfo, notify
+```
+
+## API 与权限
+
+前端继续调用既有接口：
+
+```text
+GET  /plugin/Cd2UploadStrmTrigger/status
+POST /plugin/Cd2UploadStrmTrigger/test
+POST /plugin/Cd2UploadStrmTrigger/trigger
+```
+
+`status` 新增 `event_history`、`push_primary`、`poll_fallback_enabled`，并保留原有统计、`last_trigger`、Emby、字幕和删除字段。CD2 Token 需要“获取传输任务”和“接收推送消息”；下载字幕还需要列出文件、读取文件、查看属性以及对应的 HTTP 下载能力。API 根目录必须填写 Token 的 `RootDirectory`，例如 Token 为 `/115` 就填写 `/115`。

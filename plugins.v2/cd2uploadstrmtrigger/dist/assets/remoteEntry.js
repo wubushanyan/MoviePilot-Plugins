@@ -3,7 +3,7 @@
 const currentImports = {};
 const moduleCache = {};
 
-function flattenModule(module, name) {
+function flattenModule(module) {
   /* 将联邦共享模块整理为 Vue 组件代码可直接使用的对象。 */
   if (typeof module?.default === "function") {
     Object.keys(module).forEach((key) => {
@@ -24,12 +24,12 @@ async function importShared(name) {
     if (versions.length) {
       const shared = runtime[versions[0]];
       const module = await (await shared.get())();
-      moduleCache[name] = flattenModule(module, name);
+      moduleCache[name] = flattenModule(module);
       return moduleCache[name];
     }
   }
   currentImports[name] ??= import(name);
-  moduleCache[name] = flattenModule(await currentImports[name], name);
+  moduleCache[name] = flattenModule(await currentImports[name]);
   return moduleCache[name];
 }
 
@@ -40,21 +40,31 @@ function clone(value) {
 }
 
 function injectStyle() {
-  /* 注入组件局部样式，不依赖额外 CSS 文件。 */
+  /* 注入组件局部样式，不依赖额外 CSS 文件或第三方组件库。 */
   if (typeof document === "undefined" || document.getElementById("cd2-upload-strm-trigger-style")) return;
   const style = document.createElement("style");
   style.id = "cd2-upload-strm-trigger-style";
   style.textContent = `
-    .cd2-trigger-config,.cd2-trigger-page{padding:16px;color:var(--v-theme-on-surface,#e5e7eb)}
-    .cd2-trigger-card{border:1px solid rgba(127,127,127,.25);border-radius:10px;padding:16px;margin-bottom:14px;background:rgba(127,127,127,.04)}
-    .cd2-trigger-title{font-size:18px;font-weight:600;margin-bottom:6px}.cd2-trigger-subtitle{opacity:.7;font-size:13px;margin-bottom:16px}
-    .cd2-trigger-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
-    .cd2-trigger-field{display:flex;flex-direction:column;gap:6px;font-size:13px}.cd2-trigger-field input,.cd2-trigger-field textarea{box-sizing:border-box;width:100%;border:1px solid rgba(127,127,127,.4);border-radius:6px;padding:9px;background:transparent;color:inherit;font:inherit}
-    .cd2-trigger-field textarea{min-height:78px;resize:vertical}.cd2-trigger-check{display:flex;gap:8px;align-items:center;margin:10px 0;font-size:14px}
-    .cd2-trigger-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:14px}.cd2-trigger-btn,.cd2-trigger-btn:visited,.cd2-trigger-btn:hover,.cd2-trigger-btn:focus{color:#fff !important;-webkit-text-fill-color:#fff !important}.cd2-trigger-btn{appearance:none;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;background:#424242;font:inherit;line-height:1.25}.cd2-trigger-btn.primary{background:#1976d2}.cd2-trigger-btn.danger{background:#b3261e}.cd2-trigger-btn:disabled{opacity:.55;cursor:default}
-    .cd2-trigger-rule{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:12px;margin:10px 0}.cd2-trigger-rule-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:600}.cd2-trigger-hint{font-size:12px;opacity:.7;line-height:1.6;margin-top:8px}.cd2-trigger-message{border-radius:6px;padding:10px;margin-top:12px;background:rgba(25,118,210,.12)}.cd2-trigger-error{background:rgba(211,47,47,.15)}
-    .cd2-trigger-stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.cd2-trigger-stat{padding:12px;border-radius:8px;background:rgba(127,127,127,.08)}.cd2-trigger-stat strong{display:block;font-size:20px;margin-top:4px}.cd2-trigger-muted{opacity:.68}.cd2-trigger-path{margin:8px 0;word-break:break-all;font-family:monospace;font-size:12px}.cd2-trigger-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}.cd2-trigger-pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:12px;background:rgba(127,127,127,.16)}.cd2-trigger-pill.ok{background:rgba(46,125,50,.2)}.cd2-trigger-pill.bad{background:rgba(211,47,47,.2)}
-    .cd2-trigger-help-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}.cd2-trigger-help-item{padding:12px;border-radius:8px;background:rgba(127,127,127,.08);line-height:1.65}.cd2-trigger-help-item strong{display:block;margin-bottom:4px}.cd2-trigger-help-code{display:inline-block;padding:2px 5px;border-radius:4px;background:rgba(127,127,127,.14);font-family:monospace;word-break:break-all}.cd2-trigger-help-flow{font-size:13px;line-height:1.8}
+    .cd2-trigger-config,.cd2-trigger-page{box-sizing:border-box;width:100%;padding:12px;color:var(--v-theme-on-surface,#e5e7eb);font-size:14px;line-height:1.45}
+    .cd2-trigger-title{font-size:18px;font-weight:650;margin-bottom:3px}.cd2-trigger-subtitle{font-size:12px;opacity:.72;margin-bottom:10px}
+    .cd2-trigger-card{box-sizing:border-box;border:1px solid rgba(127,127,127,.27);border-radius:9px;padding:11px;margin-bottom:9px;background:rgba(127,127,127,.045)}
+    .cd2-trigger-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px}.cd2-trigger-card-head strong{font-size:14px}.cd2-trigger-card-head small{display:block;opacity:.68;font-weight:400;margin-top:2px}
+    .cd2-trigger-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:9px}.cd2-trigger-card-wide{grid-column:1/-1}
+    .cd2-trigger-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px}.cd2-trigger-grid-wide{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+    .cd2-trigger-field{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px}.cd2-trigger-field input,.cd2-trigger-field textarea{box-sizing:border-box;width:100%;min-width:0;border:1px solid rgba(127,127,127,.42);border-radius:6px;padding:7px 8px;background:transparent;color:inherit;font:inherit;line-height:1.35}.cd2-trigger-field input:focus,.cd2-trigger-field textarea:focus{outline:2px solid rgba(33,150,243,.42);outline-offset:1px}.cd2-trigger-field textarea{min-height:68px;resize:vertical}
+    .cd2-trigger-check{display:flex;gap:7px;align-items:flex-start;margin:7px 0;font-size:13px;line-height:1.4}.cd2-trigger-check input{flex:0 0 auto;margin-top:3px}
+    .cd2-trigger-actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center;justify-content:flex-end}.cd2-trigger-footer{position:sticky;bottom:0;z-index:2;padding:9px 0 1px;background:var(--v-theme-background,rgba(20,20,20,.96))}
+    .cd2-trigger-btn,.cd2-trigger-btn:visited,.cd2-trigger-btn:hover,.cd2-trigger-btn:active,.cd2-trigger-btn:focus,.cd2-trigger-config button,.cd2-trigger-page button{appearance:none;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:7px 11px;cursor:pointer;background:#424242;font:inherit;line-height:1.25;text-decoration:none;color:#fff !important;-webkit-text-fill-color:#fff !important;text-shadow:none}.cd2-trigger-config button *,.cd2-trigger-page button *{color:#fff !important;-webkit-text-fill-color:#fff !important}.cd2-trigger-btn.primary{background:#1976d2}.cd2-trigger-btn.danger{background:#b3261e}.cd2-trigger-btn.subtle{background:#5d5d5d}.cd2-trigger-btn.small{padding:5px 8px;font-size:12px}.cd2-trigger-btn:disabled{opacity:.52;cursor:default}.cd2-trigger-btn:hover:not(:disabled){filter:brightness(1.12)}
+    .cd2-trigger-tabs{display:flex;gap:6px;overflow-x:auto;padding:1px 0 8px;margin-bottom:1px}.cd2-trigger-tab{flex:0 0 auto;white-space:nowrap;background:#3b3b3b}.cd2-trigger-tab.active{background:#1976d2;border-color:rgba(255,255,255,.3)}
+    .cd2-trigger-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:5px 0}.cd2-trigger-muted{opacity:.68}.cd2-trigger-hint,.cd2-trigger-note{font-size:12px;opacity:.78;line-height:1.58;margin-top:7px}.cd2-trigger-note{box-sizing:border-box;border-left:3px solid #42a5f5;padding:7px 9px;background:rgba(33,150,243,.11);opacity:.96}.cd2-trigger-message{border-radius:6px;padding:8px 10px;margin:8px 0;background:rgba(25,118,210,.13);white-space:pre-wrap;word-break:break-word}.cd2-trigger-error{background:rgba(211,47,47,.16);border-left:3px solid #ef5350}
+    .cd2-trigger-pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:12px;background:rgba(127,127,127,.17);white-space:nowrap}.cd2-trigger-pill.ok{background:rgba(46,125,50,.23)}.cd2-trigger-pill.bad{background:rgba(211,47,47,.23)}.cd2-trigger-pill.info{background:rgba(33,150,243,.2)}.cd2-trigger-pill.warn{background:rgba(245,124,0,.23)}
+    .cd2-trigger-stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:7px}.cd2-trigger-stat{min-width:0;padding:8px;border-radius:7px;background:rgba(127,127,127,.085)}.cd2-trigger-stat span{display:block;font-size:11px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cd2-trigger-stat strong{display:block;font-size:18px;line-height:1.15;margin-top:3px}.cd2-trigger-path{margin:5px 0;word-break:break-all;white-space:pre-wrap;font-family:monospace;font-size:11px}.cd2-trigger-stack{min-width:0}
+    .cd2-trigger-rule{border:1px solid rgba(127,127,127,.25);border-radius:7px;padding:9px;margin:8px 0;background:rgba(127,127,127,.035)}.cd2-trigger-rule-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;font-weight:600}.cd2-trigger-rule .cd2-trigger-grid{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+    .cd2-trigger-help-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px}.cd2-trigger-help-item{padding:9px;border-radius:7px;background:rgba(127,127,127,.085);line-height:1.55;font-size:12px}.cd2-trigger-help-item strong{display:block;margin-bottom:3px;font-size:13px}.cd2-trigger-help-flow{font-size:13px;line-height:1.7}.cd2-trigger-help-code{display:inline-block;padding:1px 4px;border-radius:4px;background:rgba(127,127,127,.14);font-family:monospace;word-break:break-all}
+    .cd2-trigger-event-list{max-height:min(58vh,560px);overflow:auto;padding-right:2px}.cd2-trigger-event-item{border:1px solid rgba(127,127,127,.24);border-radius:7px;margin:6px 0;overflow:hidden}.cd2-trigger-event-toggle{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;width:100%;gap:8px;text-align:left;background:rgba(127,127,127,.07)!important;border:0!important;border-radius:0!important;padding:9px!important}.cd2-trigger-event-toggle:hover{background:rgba(33,150,243,.14)!important}.cd2-trigger-event-main{min-width:0}.cd2-trigger-event-main strong,.cd2-trigger-event-main span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cd2-trigger-event-main span{font-size:12px;opacity:.72;margin-top:2px}.cd2-trigger-event-at{font-size:11px;opacity:.68;white-space:nowrap}.cd2-trigger-event-arrow{font-size:12px;opacity:.85;white-space:nowrap}
+    .cd2-trigger-category,.cd2-trigger-level{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:11px;white-space:nowrap}.cd2-trigger-category{background:rgba(127,127,127,.2)}.cd2-trigger-category.cd2-category-cd2{background:rgba(33,150,243,.25)}.cd2-trigger-category.cd2-category-generate{background:rgba(46,125,50,.25)}.cd2-trigger-category.cd2-category-delete{background:rgba(245,124,0,.28)}.cd2-trigger-category.cd2-category-refresh{background:rgba(123,31,162,.28)}.cd2-trigger-category.cd2-category-metadata{background:rgba(0,137,123,.28)}.cd2-trigger-category.cd2-category-subtitle{background:rgba(0,121,107,.28)}.cd2-trigger-level{background:rgba(127,127,127,.18)}.cd2-trigger-level.ok{background:rgba(46,125,50,.25)}.cd2-trigger-level.warn{background:rgba(245,124,0,.25)}.cd2-trigger-level.bad{background:rgba(211,47,47,.25)}
+    .cd2-trigger-event-detail{padding:9px 10px;border-top:1px solid rgba(127,127,127,.22);background:rgba(0,0,0,.06)}.cd2-trigger-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px}.cd2-trigger-detail-item{min-width:0;padding:6px 7px;border-radius:5px;background:rgba(127,127,127,.07)}.cd2-trigger-detail-item strong{display:block;font-size:11px;opacity:.68;margin-bottom:2px}.cd2-trigger-detail-item span{display:block;white-space:pre-wrap;word-break:break-word;font-size:12px}.cd2-trigger-json{box-sizing:border-box;max-height:190px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:6px;background:rgba(0,0,0,.2);font:11px/1.5 monospace;white-space:pre-wrap;word-break:break-word}.cd2-trigger-event-empty{padding:16px;text-align:center;opacity:.68}
+    @media (max-width:600px){.cd2-trigger-config,.cd2-trigger-page{padding:8px}.cd2-trigger-overview-grid{grid-template-columns:1fr}.cd2-trigger-event-toggle{grid-template-columns:auto minmax(0,1fr) auto}.cd2-trigger-event-at{grid-column:2;grid-row:2}.cd2-trigger-event-arrow{grid-column:3;grid-row:1/3}.cd2-trigger-footer{position:static}}
   `;
   document.head.appendChild(style);
 }
@@ -66,52 +76,124 @@ function apiResult(response) {
   return value;
 }
 
-function createUsageView(h, onBack, onClose) {
-  /* 插件内置使用说明，避免用户反复退出页面查找配置含义。 */
-  return h("div", { class: "cd2-trigger-page" }, [
+function apiPayload(response) {
+  const value = apiResult(response);
+  if (value?.data && typeof value.data === "object" && !Array.isArray(value.data)) return value.data;
+  return value || {};
+}
+
+function displayValue(value, fallback = "暂无") {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "object") {
+    try { return JSON.stringify(value); } catch (error) { return String(value); }
+  }
+  return String(value);
+}
+
+function jsonText(value) {
+  try { return JSON.stringify(value, null, 2); } catch (error) { return String(value); }
+}
+
+function isSortSourceDeletion(value) {
+  const text = displayValue(value, "");
+  return text.includes("/Sort") && (text.includes("删除") || /delete/i.test(text));
+}
+
+function isIgnoredSortEvent(event) {
+  if (!event || typeof event !== "object") return false;
+  const details = event.details;
+  return isSortSourceDeletion([
+    event.raw_dest_path,
+    event.path,
+    event.source,
+    event.title,
+    event.message,
+    event.status,
+    typeof details === "string" ? details : jsonText(details || ""),
+  ].join(" "));
+}
+
+function eventField(event, keys, fallback = "暂无") {
+  const detailObject = event?.details && typeof event.details === "object" && !Array.isArray(event.details)
+    ? event.details
+    : {};
+  for (const key of keys) {
+    const direct = event?.[key];
+    if (direct !== undefined && direct !== null && direct !== "") return displayValue(direct, fallback);
+    const nested = detailObject[key];
+    if (nested !== undefined && nested !== null && nested !== "") return displayValue(nested, fallback);
+  }
+  return fallback;
+}
+
+const categoryMeta = {
+  cd2_event: { label: "CD2 事件", className: "cd2-category-cd2" },
+  generate_event: { label: "生成", className: "cd2-category-generate" },
+  delete_event: { label: "删除", className: "cd2-category-delete" },
+  refresh_event: { label: "刷新", className: "cd2-category-refresh" },
+  metadata_event: { label: "元数据", className: "cd2-category-metadata" },
+  subtitle_event: { label: "字幕", className: "cd2-category-subtitle" },
+};
+
+function categoryInfo(category) {
+  return categoryMeta[category] || { label: displayValue(category, "其他事件"), className: "" };
+}
+
+function levelInfo(level, status, ignored = false) {
+  if (ignored) return { label: "已忽略", className: "" };
+  const value = String(level || status || "info").toLowerCase();
+  if (value.includes("error") || value.includes("fail") || value.includes("critical")) return { label: "错误", className: "bad" };
+  if (value.includes("warn") || value.includes("pending")) return { label: "注意", className: "warn" };
+  if (value.includes("success") || value.includes("ok") || value.includes("done")) return { label: "成功", className: "ok" };
+  return { label: displayValue(level || status, "记录"), className: "" };
+}
+
+function createUsageView(h, onBack, onClose, onSettings, options = {}) {
+  /* 插件内置使用说明，状态页和设置页共用，避免用户反复离开页面查找配置含义。 */
+  const actions = [];
+  if (onBack) actions.push(h("button", { type: "button", class: "cd2-trigger-btn primary", onClick: onBack }, options.backLabel || "返回总览"));
+  if (onSettings) actions.push(h("button", { type: "button", class: "cd2-trigger-btn", onClick: onSettings }, "去设置"));
+  if (onClose) actions.push(h("button", { type: "button", class: "cd2-trigger-btn", onClick: onClose }, "关闭"));
+  return h("div", { class: `cd2-trigger-page cd2-trigger-usage${options.compact ? " cd2-trigger-usage-compact" : ""}` }, [
     h("div", { class: "cd2-trigger-title" }, "使用说明"),
-    h("div", { class: "cd2-trigger-subtitle" }, "CD2 上传完成后，媒体文件生成 STRM，字幕文件下载到同一媒体目录。"),
+    h("div", { class: "cd2-trigger-subtitle" }, "Push 主触发、分类事件、目录映射和生成后动作的快速说明。"),
     h("div", { class: "cd2-trigger-card" }, [
-      h("strong", "处理流程"),
-      h("div", { class: "cd2-trigger-help-flow" }, "CD2 上传完成 → PushMessage/文件变更消息或快速补扫捕获 → 命中目录规则 → 媒体文件调用 115 STRM 助手生成 STRM，字幕文件由本插件从 CD2 下载到本地 → 媒体、字幕和删除事件进入同一个 Emby 刷新防抖窗口；窗口内每个已配置 Emby 只请求一次。插件启动后的第一次成功扫描只建立状态基线，已存在的完成任务不会补处理。"),
+      h("div", { class: "cd2-trigger-card-head" }, [h("strong", "处理流程"), h("span", { class: "cd2-trigger-pill info" }, "Push 优先")]),
+      h("div", { class: "cd2-trigger-help-flow" }, "CD2 上传完成 → PushMessage/文件变更消息捕获 → 命中目录规则 → 媒体交给 115 STRM 助手生成 STRM，字幕由本插件下载到本地 → 生成、字幕、删除和刷新事件按批次记录并进入 Emby 刷新防抖窗口。插件启动后的第一次成功扫描只建立状态基线，已有完成任务不会补处理。"),
     ]),
     h("div", { class: "cd2-trigger-card" }, [
-      h("strong", "网页/公网远程上传"),
-      h("div", { class: "cd2-trigger-help-flow" }, "通过 CD2 网页、反向代理或公网 IPv6 上传属于 RemoteUpload，不要求上传客户端位于局域网。插件会记录 operatorType=RemoteUpload，并同时监听上传状态和文件系统 CREATE/RENAME 事件；上传数量变化后还会执行多次快速补扫。"),
-      h("div", { class: "cd2-trigger-hint" }, "CD2 API 根目录必须填写令牌创建时的 RootDirectory，例如令牌 RootDirectory=/115 就填写 /115。"),
+      h("div", { class: "cd2-trigger-card-head" }, [h("strong", "监听模式"), h("span", { class: "cd2-trigger-pill ok" }, "Push 主触发")]),
+      h("div", { class: "cd2-trigger-help-flow" }, "PushMessage 是主触发方式；“轮询兜底”默认关闭。开启后，启动时仍只建立一次基线，Push 仍然是主路径，只有上传数量变化需要补扫、手动检查，或明确开启兜底开关时才进行轮询。关闭兜底可减少 CD2 API 轮询压力，断线补偿则依赖手动检查或再次收到 Push。"),
+      h("div", { class: "cd2-trigger-note" }, "轮询兜底默认关闭；它不会改变启动基线规则，也不会把已有 Finish 任务批量重新处理。"),
     ]),
     h("div", { class: "cd2-trigger-card" }, [
-      h("strong", "目录映射三段的实际用途"),
+      h("div", { class: "cd2-trigger-card-head" }, [h("strong", "目录映射"), h("span", { class: "cd2-trigger-pill info" }, "三段映射")]),
       h("div", { class: "cd2-trigger-help-grid" }, [
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "CD2 目标目录前缀"), h("span", "CD2 任务的 destPath 起始目录，只监控这个目录及其子目录。/CloudNAS/115/影视库、/115/影视库、/影视库会自动按同一目录处理。")]),
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "115 网盘路径前缀"), h("span", "对应 115 网盘中的媒体库根目录，用来组成 STRM 的 pan_path。例如 /影视库。")]),
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "本地 STRM 根目录"), h("span", "MoviePilot/Emby 实际能看到的本地媒体目录。STRM 和字幕会按相同相对目录落在这里。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "CD2 目标目录前缀"), h("span", "监控任务 destPath 的范围，只匹配该目录及子目录；/CloudNAS/115/影视库、/115/影视库、/影视库会按同一目录归一化。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "115 网盘路径前缀"), h("span", "对应 115 网盘媒体库根目录，用来组成 STRM 请求里的 pan_path。按当前 115 助手 API 传网盘相对根目录，例如 /影视库。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "本地 STRM 根目录"), h("span", "MoviePilot/Emby 读取 STRM 和字幕的本地根目录；两类文件沿相同相对路径落盘。")]),
       ]),
-      h("div", { class: "cd2-trigger-hint" }, "示例：/CloudNAS/115/影视库/电影/a.mkv、/115/影视库/电影/a.mkv 或 /影视库/电影/a.mkv → 115 /影视库/电影/a.mkv → 本地 /media/MP_movieDB/影视库/电影下的对应 STRM 文件。"),
+      h("div", { class: "cd2-trigger-note" }, "示例：CD2 目标 /115/影视库/电影/a.mkv（归一化为 /影视库/电影/a.mkv）→ 115 /影视库/电影/a.mkv → 本地 /media/MP_movieDB/影视库/电影/a.strm；/Sort 是备份源目录，不是插件监控前缀。"),
     ]),
     h("div", { class: "cd2-trigger-card" }, [
-      h("strong", "媒体、字幕和附加动作"),
+      h("div", { class: "cd2-trigger-card-head" }, [h("strong", "文件、字幕和附加动作"), h("span", { class: "cd2-trigger-pill info" }, "按开关执行")]),
       h("div", { class: "cd2-trigger-help-grid" }, [
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "媒体扩展名"), h("span", "命中后提交给 115 STRM 助手生成 STRM，不下载原媒体文件。")]),
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "字幕扩展名"), h("span", "默认 srt、ssa、ass、vtt、sub、idx、sup；由本插件直接从 CD2 下载，不生成 STRM。")]),
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "字幕下载间隔"), h("span", "单线程串行下载，控制每次字幕下载请求的最小间隔；设置为 0 表示不额外等待。")]),
-        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "字幕稳定等待"), h("span", "字幕事件入队后先等待，再连续读取两次 CD2 文件大小；大小稳定后才开始下载，避免远程上传尚未结束。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "媒体扩展名"), h("span", "命中后提交给 115 STRM 助手生成 STRM，不下载原媒体文件；单批最多提交 100 个任务。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "字幕扩展名/限速"), h("span", "默认 srt、ssa、ass、vtt、sub、idx、sup。字幕由本插件单线程串行下载，按下载间隔限速，并在下载前等待文件大小稳定。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "自动下载媒体元数据"), h("span", "由 115 STRM 助手按自身 user_download_mediaext 配置处理 .nfo、图片等文件，不等于本插件字幕下载。")]),
+        h("div", { class: "cd2-trigger-help-item" }, [h("strong", "Emby 刷新与删除"), h("span", "媒体、字幕和删除同步成功后进入同一防抖窗口；删除同步默认关闭，仅删除对应 STRM/字幕和确实为空的目录。")]),
       ]),
-      h("div", { class: "cd2-trigger-hint" }, "“自动下载媒体元数据”是 115 STRM 助手按自身 user_download_mediaext 配置下载 .nfo、图片等文件的开关，不等于本插件的字幕下载；本插件的字幕任务不会把这个开关传给 115 助手。"),
     ]),
     h("div", { class: "cd2-trigger-card" }, [
-      h("strong", "四个生成后选项由谁执行"),
-      h("div", { class: "cd2-trigger-help-flow" }, "“自动刮削元数据”由 115 STRM 助手调用 MoviePilot 的元数据刮削链路执行，不是 Emby MediaInfoKeeper；“刷新媒体服务器”由本插件调用 MoviePilot 已配置的 Emby API，媒体 STRM 生成成功、字幕下载成功或本地删除同步成功都会进入防抖窗口；“自动下载媒体元数据”由 115 STRM 助手的 MediaInfoDownloader 按自身扩展名配置执行。本插件只把媒体任务参数交给 115 助手，并负责字幕下载、删除同步和批次 Emby 刷新。“发送生成结果通知”由本插件调用 MoviePilot 的 post_message，使用 MP 已配置的通知渠道（例如 Telegram），通知的是 STRM 批次结果，不会逐个发送字幕通知。"),
+      h("div", { class: "cd2-trigger-card-head" }, [h("strong", "CD2 Token 权限"), h("span", { class: "cd2-trigger-pill warn" }, "按需授权")]),
+      h("div", { class: "cd2-trigger-help-flow" }, "监听需要“获取传输任务”和“接收推送消息”；下载字幕还需要文件读取相关权限，包括列出文件、读取文件、查看属性，以及对应的 HTTP 下载能力。CD2 API 根目录必须与 Token 的 RootDirectory 一致，例如 Token RootDirectory=/115 就填写 /115。"),
     ]),
-    h("div", { class: "cd2-trigger-actions" }, [
-      h("button", { type: "button", class: "cd2-trigger-btn primary", onClick: onBack }, "返回"),
-      h("button", { type: "button", class: "cd2-trigger-btn", onClick: onClose }, "关闭"),
-    ]),
+    actions.length ? h("div", { class: "cd2-trigger-actions" }, actions) : null,
   ]);
 }
 
 async function createConfigModule() {
-  /* 创建插件配置组件。 */
+  /* 创建插件配置组件，使用多个紧凑子页避免长表单整页滚动。 */
   const vue = await importShared("vue");
   const { defineComponent, h, onMounted, reactive, ref } = vue;
   injectStyle();
@@ -124,7 +206,6 @@ async function createConfigModule() {
     },
     emits: ["save", "close", "switch"],
     setup(props, { emit }) {
-      /* 配置表单的默认值。 */
       const defaults = {
         enabled: false,
         cd2_endpoint: "http://172.17.0.1:19798",
@@ -136,6 +217,7 @@ async function createConfigModule() {
         poll_interval: 5,
         batch_window: 5,
         page_size: 200,
+        poll_fallback_enabled: false,
         include_extensions: "mkv,mp4,ts,avi,mov,m4v,wmv,flv,m2ts,iso,rmvb,webm,mpeg,mpg,3gp,asf,tp,f4v",
         subtitle_extensions: "srt,ssa,ass,vtt,sub,idx,sup",
         subtitle_interval: 3,
@@ -149,15 +231,34 @@ async function createConfigModule() {
       };
       const config = reactive({ ...defaults, ...clone(props.initialConfig) });
       config.rules = Array.isArray(config.rules) ? config.rules : [];
+      config.rules.forEach((rule, index) => {
+        if (!rule || typeof rule !== "object") config.rules[index] = { enabled: true, name: "", cd2_prefix: "", pan_prefix: "", local_path: "" };
+      });
+      const tabs = [
+        { key: "connection", label: "连接与监听" },
+        { key: "rules", label: "目录规则" },
+        { key: "files", label: "文件与限速" },
+        { key: "actions", label: "生成后动作" },
+        { key: "usage", label: "使用说明" },
+      ];
+      const activeTab = ref("connection");
       const message = ref("");
       const messageError = ref(false);
       const testing = ref(false);
-      const showHelp = ref(false);
 
-      function setMessage(text, error = false) {
-        /* 更新配置页面提示信息。 */
-        message.value = text || "";
+      function setMessage(value, error = false) {
+        message.value = value || "";
         messageError.value = error;
+      }
+
+      function button(label, onClick, className = "", extra = {}) {
+        return h("button", { type: "button", class: `cd2-trigger-btn ${className}`.trim(), onClick, ...extra }, label);
+      }
+
+      function cardHead(title, subtitle = "") {
+        return h("div", { class: "cd2-trigger-card-head" }, [
+          h("div", [h("strong", title), subtitle ? h("small", subtitle) : null]),
+        ]);
       }
 
       function addRule() {
@@ -171,7 +272,6 @@ async function createConfigModule() {
       }
 
       function field(label, key, placeholder = "", secret = false) {
-        /* 创建普通文本配置控件。 */
         return h("label", { class: "cd2-trigger-field" }, [
           h("span", label),
           h("input", {
@@ -185,21 +285,36 @@ async function createConfigModule() {
       }
 
       function numberField(label, key, min, max, step = 1) {
-        /* 创建数字配置控件。 */
         return h("label", { class: "cd2-trigger-field" }, [
           h("span", label),
           h("input", {
             type: "number", min, max, step, value: config[key],
-            onInput: (event) => { config[key] = Number(event.target.value); },
+            onInput: (event) => {
+              const next = Number(event.target.value);
+              config[key] = Number.isNaN(next) ? 0 : next;
+            },
           }),
         ]);
       }
 
       function checkField(label, key) {
-        /* 创建布尔配置控件。 */
         return h("label", { class: "cd2-trigger-check" }, [
           h("input", { type: "checkbox", checked: !!config[key], onChange: (event) => { config[key] = event.target.checked; } }),
           h("span", label),
+        ]);
+      }
+
+      function ruleCheckField(rule) {
+        return h("label", { class: "cd2-trigger-check" }, [
+          h("input", { type: "checkbox", checked: !!rule.enabled, onChange: (event) => { rule.enabled = event.target.checked; } }),
+          h("span", "启用此规则"),
+        ]);
+      }
+
+      function ruleField(rule, label, key, placeholder = "") {
+        return h("label", { class: "cd2-trigger-field" }, [
+          h("span", label),
+          h("input", { value: rule[key] || "", placeholder, onInput: (event) => { rule[key] = event.target.value; } }),
         ]);
       }
 
@@ -222,80 +337,149 @@ async function createConfigModule() {
         emit("save", clone(config));
       }
 
-      function closeHelp() {
-        /* 返回配置表单。 */
-        showHelp.value = false;
+      function moveTab(delta) {
+        const index = tabs.findIndex((tab) => tab.key === activeTab.value);
+        const next = Math.max(0, Math.min(tabs.length - 1, index + delta));
+        activeTab.value = tabs[next].key;
+      }
+
+      function tabButton(tab) {
+        return button(tab.label, () => { activeTab.value = tab.key; }, `cd2-trigger-tab${activeTab.value === tab.key ? " active" : ""}`);
+      }
+
+      function renderConnectionTab() {
+        return h("div", { class: "cd2-trigger-stack" }, [
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("基本连接", "填写 CD2 与 MoviePilot 地址、令牌；令牌不会在页面中回显。"),
+            checkField("启用插件", "enabled"),
+            h("div", { class: "cd2-trigger-grid cd2-trigger-grid-wide" }, [
+              field("CD2 gRPC 地址", "cd2_endpoint", "例如 CD2 服务地址"),
+              field("CD2 API Token", "cd2_token", "仅填写 Token，不要写 Bearer", true),
+              field("CD2 API 根目录（Token RootDirectory）", "cd2_api_root", "/115"),
+              field("MoviePilot 地址", "moviepilot_url", "例如 MoviePilot 服务地址"),
+              field("MoviePilot API Key（可选）", "moviepilot_api_key", "留空则使用系统 API_TOKEN", true),
+            ]),
+            h("div", { class: "cd2-trigger-hint" }, "CD2 Token 需要开启“获取传输任务”和“接收推送消息”；下载字幕还需列出文件、读取文件、查看属性等文件读取权限。API 根目录必须与令牌 RootDirectory 一致。MoviePilot API Key 留空时使用当前实例的系统 API_TOKEN。"),
+          ]),
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("监听模式", "PushMessage 是主触发路径，轮询只是可选补偿。"),
+            h("div", { class: "cd2-trigger-row" }, [
+              h("span", { class: "cd2-trigger-pill ok" }, "Push 主触发"),
+              h("span", { class: `cd2-trigger-pill ${config.poll_fallback_enabled ? "warn" : "info"}` }, `轮询兜底：${config.poll_fallback_enabled ? "已开启" : "默认关闭"}`),
+            ]),
+            checkField("开启轮询兜底（默认关闭）", "poll_fallback_enabled"),
+            h("div", { class: "cd2-trigger-note" }, "启动时只建立一次状态基线；Push 为主，只有数量变化按需补扫、手动检查或开启兜底才轮询。关闭此开关不会关闭 Push，也不会处理启动前已有的 Finish 任务。"),
+            h("div", { class: "cd2-trigger-grid" }, [numberField("轮询间隔（秒）", "poll_interval", 2, 60)]),
+            h("div", { class: "cd2-trigger-actions" }, [button(testing.value ? "测试中…" : "手动测试连接", testConnection, "primary", { disabled: testing.value })]),
+          ]),
+        ]);
+      }
+
+      function renderRulesTab() {
+        return h("div", { class: "cd2-trigger-stack" }, [
+          h("div", { class: "cd2-trigger-card" }, [
+            h("div", { class: "cd2-trigger-card-head" }, [
+              h("div", [h("strong", "目录映射规则"), h("small", "CD2 目标目录前缀 → 115 网盘路径前缀 → 本地 STRM 根目录")]),
+              button("添加规则", addRule, "primary small"),
+            ]),
+            h("div", { class: "cd2-trigger-hint" }, "CD2 前缀负责监控范围，支持挂载/源/API 路径归一化；115 前缀负责生成 STRM 的 pan_path；本地根目录是 MoviePilot/Emby 读取 STRM 和字幕的位置。匹配采用目录边界，不会把 /电影2 误判为 /电影。"),
+            ...config.rules.map((rule, index) => h("div", { class: "cd2-trigger-rule", key: index }, [
+              h("div", { class: "cd2-trigger-rule-head" }, [
+                h("span", `规则 ${index + 1}`),
+                button("删除", () => removeRule(index), "danger small"),
+              ]),
+              ruleCheckField(rule),
+              h("div", { class: "cd2-trigger-grid" }, [
+                ruleField(rule, "规则名称", "name", "例如电影库"),
+                ruleField(rule, "CD2 目标目录前缀（挂载/源/API 均可）", "cd2_prefix", "/影视库"),
+                ruleField(rule, "115 网盘路径前缀", "pan_prefix", "/影视库"),
+                ruleField(rule, "本地 STRM 根目录", "local_path", "/media/MP_movieDB/影视库"),
+              ]),
+            ])),
+            config.rules.length === 0 ? h("div", { class: "cd2-trigger-event-empty" }, "还没有规则，请添加至少一条目录映射。") : null,
+          ]),
+        ]);
+      }
+
+      function renderFilesTab() {
+        return h("div", { class: "cd2-trigger-stack" }, [
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("文件与批处理", "控制单次读取和提交的节奏；媒体 STRM 单批最多提交 100 个任务。"),
+            h("div", { class: "cd2-trigger-grid" }, [
+              numberField("批处理等待（秒）", "batch_window", 0, 120),
+              numberField("每页任务数", "page_size", 20, 1000),
+              field("媒体扩展名（逗号分隔）", "include_extensions", "mkv,mp4,ts"),
+            ]),
+          ]),
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("字幕下载与限速", "字幕不生成 STRM，由本插件独立下载到映射后的本地媒体目录。"),
+            h("div", { class: "cd2-trigger-grid" }, [
+              field("字幕扩展名（逗号分隔）", "subtitle_extensions", "srt,ssa,ass,vtt,sub,idx,sup"),
+              numberField("字幕下载间隔（秒）", "subtitle_interval", 0, 60, 0.5),
+              numberField("字幕稳定等待（秒）", "subtitle_stability_delay", 0, 60, 0.5),
+            ]),
+            h("div", { class: "cd2-trigger-hint" }, "下载前先等待并连续读取两次 CD2 文件大小；大小稳定后才下载，失败会按后端策略重试。间隔设为 0 表示不额外等待。"),
+          ]),
+        ]);
+      }
+
+      function renderActionsTab() {
+        return h("div", { class: "cd2-trigger-stack" }, [
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("生成后动作", "这些开关只决定生成成功后的附加动作，不改变 Push/轮询监听。"),
+            checkField("由 115 STRM 助手刮削元数据", "scrape_metadata"),
+            checkField("由 115 STRM 助手下载 .nfo/.jpg 等媒体元数据", "auto_download_mediainfo"),
+            checkField("发送 STRM 生成结果通知（使用 MoviePilot 通知渠道）", "notify"),
+            h("div", { class: "cd2-trigger-hint" }, "自动刮削和媒体元数据下载由 115 STRM 助手执行；本插件字幕下载是独立流程，不会把字幕任务传给助手。"),
+          ]),
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("Emby 刷新与删除同步", "媒体、字幕、删除同步成功后可合并为一次刷新。"),
+            checkField("由本插件刷新 Emby（媒体/字幕/删除，防抖）", "media_server_refresh"),
+            h("div", { class: "cd2-trigger-grid" }, [numberField("Emby 刷新防抖（秒）", "emby_refresh_debounce", 0, 120, 0.5)]),
+            checkField("同步 CD2 删除到本地（仅删除对应字幕/STRM和空目录）", "delete_sync"),
+            h("div", { class: "cd2-trigger-note" }, "删除同步默认关闭；开启后仅处理监控目录中对应的本地字幕/STRM，并只清理确实为空的目录，不递归删除其他文件。/Sort 源文件删除属于非监控事件，已忽略。"),
+          ]),
+        ]);
+      }
+
+      function renderTabBody() {
+        if (activeTab.value === "rules") return renderRulesTab();
+        if (activeTab.value === "files") return renderFilesTab();
+        if (activeTab.value === "actions") return renderActionsTab();
+        if (activeTab.value === "usage") {
+          return createUsageView(h, () => { activeTab.value = "connection"; }, () => emit("close"), null, { compact: true, backLabel: "返回连接与监听" });
+        }
+        return renderConnectionTab();
       }
 
       onMounted(() => {
-        /* 确保旧版本配置缺少规则数组时仍可编辑。 */
         if (!Array.isArray(config.rules)) config.rules = [];
       });
 
-      return () => showHelp.value
-        ? createUsageView(h, closeHelp, () => emit("close"))
-        : h("form", { class: "cd2-trigger-config", onSubmit: (event) => { event.preventDefault(); save(); } }, [
-        h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
-        h("div", { class: "cd2-trigger-subtitle" }, "监听 CloudDrive2 上传完成状态：媒体生成 STRM，字幕按限速下载。"),
-        h("div", { class: "cd2-trigger-card" }, [
-          checkField("启用插件", "enabled"),
-          h("div", { class: "cd2-trigger-grid" }, [
-            field("CD2 gRPC 地址", "cd2_endpoint", "http://172.17.0.1:19798"),
-            field("CD2 API Token", "cd2_token", "仅填写 Token，不要写 Bearer", true),
-            field("CD2 API 根目录（Token RootDirectory）", "cd2_api_root", "/115"),
-            field("MoviePilot 地址", "moviepilot_url", "http://127.0.0.1:3001"),
-            field("MoviePilot API Key（可选）", "moviepilot_api_key", "留空则使用系统 API_TOKEN", true),
+      return () => {
+        const tabIndex = tabs.findIndex((tab) => tab.key === activeTab.value);
+        return h("form", { class: "cd2-trigger-config", onSubmit: (event) => { event.preventDefault(); save(); } }, [
+          h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
+          h("div", { class: "cd2-trigger-subtitle" }, "v0.8.0 · Push 主触发、分类事件历史、多页设置；保留现有测试、保存和关闭交互。"),
+          h("div", { class: "cd2-trigger-tabs", role: "tablist" }, tabs.map(tabButton)),
+          renderTabBody(),
+          message.value ? h("div", { class: `cd2-trigger-message${messageError.value ? " cd2-trigger-error" : ""}` }, message.value) : null,
+          h("div", { class: "cd2-trigger-actions cd2-trigger-footer" }, [
+            button("上一页", () => moveTab(-1), "subtle", { disabled: tabIndex <= 0 }),
+            button("下一页", () => moveTab(1), "subtle", { disabled: tabIndex >= tabs.length - 1 }),
+            button(testing.value ? "测试中…" : "测试连接", testConnection, "", { disabled: testing.value }),
+            h("button", { type: "submit", class: "cd2-trigger-btn primary" }, "保存配置"),
+            button("关闭", () => emit("close")),
           ]),
-          h("div", { class: "cd2-trigger-hint" }, "CD2 Token 需要开启“获取传输任务”和“接收推送消息”权限；要下载字幕，还需开启文件读取里的“列出文件、读取文件、查看属性”。API 根目录必须与令牌 RootDirectory 一致，例如令牌为 /115 就填写 /115；插件会自动兼容 /CloudNAS/115、/115、/影视库 三种路径。MoviePilot API Key 留空时，插件会尝试使用当前实例的系统 API_TOKEN。"),
-        ]),
-        h("div", { class: "cd2-trigger-card" }, [
-          h("div", { class: "cd2-trigger-row" }, [h("strong", "目录映射规则"), h("button", { type: "button", class: "cd2-trigger-btn", onClick: addRule }, "添加规则")]),
-          h("div", { class: "cd2-trigger-hint" }, "CD2 前缀负责监控范围；网页/公网远程上传可能使用 /115 或 /影视库，插件会自动归一化，不要求你把 /CloudNAS/115 改成其他写法。115 前缀负责生成 STRM 的网盘路径；本地根目录是 MP/Emby 读取 STRM 和字幕的位置。匹配采用目录边界，不会把 /电影2 误判为 /电影。"),
-          ...config.rules.map((rule, index) => h("div", { class: "cd2-trigger-rule", key: index }, [
-            h("div", { class: "cd2-trigger-rule-head" }, [h("span", `规则 ${index + 1}`), h("button", { type: "button", class: "cd2-trigger-btn danger", onClick: () => removeRule(index) }, "删除")]),
-            h("label", { class: "cd2-trigger-check" }, [h("input", { type: "checkbox", checked: !!rule.enabled, onChange: (event) => { rule.enabled = event.target.checked; } }), h("span", "启用此规则")]),
-            h("div", { class: "cd2-trigger-grid" }, [
-              h("label", { class: "cd2-trigger-field" }, [h("span", "规则名称"), h("input", { value: rule.name || "", onInput: (event) => { rule.name = event.target.value; } })]),
-              h("label", { class: "cd2-trigger-field" }, [h("span", "CD2 目标目录前缀（挂载/源/API 均可）"), h("input", { value: rule.cd2_prefix || "", placeholder: "/影视库", onInput: (event) => { rule.cd2_prefix = event.target.value; } })]),
-              h("label", { class: "cd2-trigger-field" }, [h("span", "115 网盘路径前缀"), h("input", { value: rule.pan_prefix || "", placeholder: "/影视库", onInput: (event) => { rule.pan_prefix = event.target.value; } })]),
-              h("label", { class: "cd2-trigger-field" }, [h("span", "本地 STRM 根目录"), h("input", { value: rule.local_path || "", placeholder: "/media/MP_movieDB/影视库", onInput: (event) => { rule.local_path = event.target.value; } })]),
-            ]),
-          ])),
-          config.rules.length === 0 ? h("div", { class: "cd2-trigger-muted" }, "还没有规则，请添加至少一条目录映射。") : null,
-        ]),
-        h("div", { class: "cd2-trigger-card" }, [
-          h("div", { class: "cd2-trigger-grid" }, [
-            numberField("轮询间隔（秒）", "poll_interval", 2, 60),
-            numberField("批处理等待（秒）", "batch_window", 0, 120),
-            numberField("每页任务数", "page_size", 20, 1000),
-            field("媒体扩展名（逗号分隔）", "include_extensions", "mkv,mp4,ts"),
-            field("字幕扩展名（下载，逗号分隔）", "subtitle_extensions", "srt,ssa,ass,vtt,sub,idx,sup"),
-            numberField("字幕下载间隔（秒）", "subtitle_interval", 0, 60, 0.5),
-            numberField("字幕稳定等待（秒）", "subtitle_stability_delay", 0, 60, 0.5),
-            numberField("Emby 刷新防抖（秒）", "emby_refresh_debounce", 0, 120, 0.5),
-          ]),
-          checkField("由 115 STRM 助手刮削元数据", "scrape_metadata"),
-          checkField("由本插件刷新 Emby（媒体/字幕/删除，防抖）", "media_server_refresh"),
-          checkField("同步 CD2 删除到本地（仅删除对应字幕/STRM和空目录）", "delete_sync"),
-          checkField("由 115 STRM 助手下载 .nfo/.jpg 等媒体元数据", "auto_download_mediainfo"),
-          checkField("发送 STRM 生成结果通知（使用 MoviePilot 通知渠道）", "notify"),
-          h("div", { class: "cd2-trigger-hint" }, "启动后的第一次成功扫描固定只建立基线，已有完成任务不会处理；后续新完成任务才会触发。PushMessage 优先，轮询作断线兜底；STRM 最多 100 个一批提交。开启 Emby 刷新后，媒体 STRM、外挂字幕下载和删除同步都会进入同一个防抖窗口，窗口结束后每个已配置 Emby 只发送一次 Library/Refresh 请求。删除同步默认关闭，开启后仅删除对应本地字幕/STRM及空目录，不递归删除文件。"),
-        ]),
-        message.value ? h("div", { class: `cd2-trigger-message${messageError.value ? " cd2-trigger-error" : ""}` }, message.value) : null,
-        h("div", { class: "cd2-trigger-actions" }, [
-          h("button", { type: "button", class: "cd2-trigger-btn", onClick: () => { showHelp.value = true; } }, "使用说明"),
-          h("button", { type: "button", class: "cd2-trigger-btn", disabled: testing.value, onClick: testConnection }, testing.value ? "测试中…" : "测试连接"),
-          h("button", { type: "submit", class: "cd2-trigger-btn primary" }, "保存配置"),
-          h("button", { type: "button", class: "cd2-trigger-btn", onClick: () => emit("close") }, "关闭"),
-        ]),
-      ]);
+        ]);
+      };
     },
   });
   return () => Config;
 }
 
 async function createPageModule() {
-  /* 创建插件状态页面组件。 */
+  /* 创建插件状态页面，分为总览、事件和说明三个子页。 */
   const vue = await importShared("vue");
   const { defineComponent, h, onMounted, onUnmounted, ref } = vue;
   injectStyle();
@@ -309,20 +493,21 @@ async function createPageModule() {
     },
     emits: ["close", "switch"],
     setup(props, { emit }) {
-      /* 管理状态页的数据和按钮状态。 */
       const status = ref({});
       const loading = ref(false);
       const triggering = ref(false);
       const message = ref("");
-      const showHelp = ref(false);
+      const activeTab = ref("overview");
+      const expandedEventId = ref("");
       let timer = null;
 
+      const endpointId = () => props.pluginId || "Cd2UploadStrmTrigger";
+
       async function loadStatus() {
-        /* 从后端读取监听器状态。 */
+        /* 从后端读取监听器状态；同时兼容旧宿主的响应包装。 */
         loading.value = true;
         try {
-          const response = apiResult(await props.api.get(`/plugin/${props.pluginId || "Cd2UploadStrmTrigger"}/status`));
-          status.value = response?.data || response || {};
+          status.value = apiPayload(await props.api.get(`/plugin/${endpointId()}/status`));
         } catch (error) {
           message.value = error?.message || "读取状态失败";
         } finally {
@@ -334,7 +519,7 @@ async function createPageModule() {
         /* 请求后台立即检查一次 CD2 上传任务。 */
         triggering.value = true;
         try {
-          const response = apiResult(await props.api.post(`/plugin/${props.pluginId || "Cd2UploadStrmTrigger"}/trigger`, {}));
+          const response = apiPayload(await props.api.post(`/plugin/${endpointId()}/trigger`, {}));
           message.value = response?.message || "已请求检查";
           await loadStatus();
         } catch (error) {
@@ -344,14 +529,219 @@ async function createPageModule() {
         }
       }
 
-      function stat(label, value) {
-        /* 创建状态统计卡片。 */
-        return h("div", { class: "cd2-trigger-stat" }, [h("span", { class: "cd2-trigger-muted" }, label), h("strong", String(value ?? 0))]);
+      function button(label, onClick, className = "", extra = {}) {
+        return h("button", { type: "button", class: `cd2-trigger-btn ${className}`.trim(), onClick, ...extra }, label);
       }
 
-      function closeHelp() {
-        /* 返回状态页。 */
-        showHelp.value = false;
+      function settingsButton() {
+        return button("去设置", () => emit("switch"), "small");
+      }
+
+      function cardHead(title, subtitle = "", withSettings = true) {
+        const actions = withSettings ? [settingsButton()] : [];
+        return h("div", { class: "cd2-trigger-card-head" }, [
+          h("div", [h("strong", title), subtitle ? h("small", subtitle) : null]),
+          actions.length ? h("div", { class: "cd2-trigger-actions" }, actions) : null,
+        ]);
+      }
+
+      function stat(label, value) {
+        return h("div", { class: "cd2-trigger-stat" }, [h("span", label), h("strong", displayValue(value, "0"))]);
+      }
+
+      function statusFallbackEnabled() {
+        if (status.value.poll_fallback_enabled !== undefined) return !!status.value.poll_fallback_enabled;
+        return !!props.initialConfig?.poll_fallback_enabled;
+      }
+
+      function sortedEvents() {
+        const history = Array.isArray(status.value.event_history) ? status.value.event_history : [];
+        return history.map((event, index) => ({ event: event || {}, index })).sort((left, right) => {
+          const leftAt = Date.parse(String(left.event.at || ""));
+          const rightAt = Date.parse(String(right.event.at || ""));
+          if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && leftAt !== rightAt) return rightAt - leftAt;
+          if (left.event.at && right.event.at && left.event.at !== right.event.at) return String(right.event.at).localeCompare(String(left.event.at));
+          return right.index - left.index;
+        }).slice(0, 10);
+      }
+
+      function eventKey(event, index) {
+        return String(event.id ?? `${event.at || "event"}-${index}`);
+      }
+
+      function eventDetails(event) {
+        return [
+          ["原始 destPath", eventField(event, ["raw_dest_path", "rawDestPath", "dest_path", "destPath"])],
+          ["规范化 path", eventField(event, ["path", "normalized_path", "normalizedPath"])],
+          ["来源", eventField(event, ["source"])],
+          ["操作类型", eventField(event, ["operation_type", "operationType", "operation"], categoryInfo(event.category).label)],
+          ["操作/处理状态", eventField(event, ["status", "state"])],
+          ["消息类型", eventField(event, ["message_type", "messageType"])],
+          ["原因", eventField(event, ["reason", "cause"], event.message || "暂无")],
+          ["结果", eventField(event, ["result", "outcome"], event.message || "暂无")],
+          ["事件时间", eventField(event, ["at", "time", "timestamp"])],
+          ["级别", eventField(event, ["level"])],
+        ];
+      }
+
+      function renderEvent(event, index) {
+        const key = eventKey(event, index);
+        const expanded = expandedEventId.value === key;
+        const category = categoryInfo(event.category);
+        const ignored = isIgnoredSortEvent(event);
+        const level = levelInfo(event.level, event.status, ignored);
+        const title = displayValue(event.title || event.message, "未命名事件");
+        const messageText = event.title && event.message ? displayValue(event.message, "") : "";
+        const detailRows = eventDetails(event);
+        return h("div", { class: "cd2-trigger-event-item", key }, [
+          h("button", {
+            type: "button",
+            class: "cd2-trigger-event-toggle",
+            "aria-expanded": expanded,
+            onClick: () => { expandedEventId.value = expanded ? "" : key; },
+          }, [
+            h("span", { class: `cd2-trigger-category ${category.className}` }, category.label),
+            h("span", { class: "cd2-trigger-event-main" }, [h("strong", title), messageText ? h("span", messageText) : null]),
+            h("span", { class: "cd2-trigger-event-at" }, displayValue(event.at, "时间未知")),
+            h("span", { class: `cd2-trigger-level ${level.className}` }, level.label),
+            h("span", { class: "cd2-trigger-event-arrow" }, expanded ? "收起" : "详情"),
+          ]),
+          expanded ? h("div", { class: "cd2-trigger-event-detail" }, [
+            h("div", { class: "cd2-trigger-detail-grid" }, detailRows.map(([label, value]) => h("div", { class: "cd2-trigger-detail-item", key: label }, [h("strong", label), h("span", value)]))),
+            event.message ? h("div", { class: "cd2-trigger-message" }, `消息：${displayValue(event.message)}`) : null,
+            event.details !== undefined && event.details !== null ? h("pre", { class: "cd2-trigger-json" }, jsonText(event.details)) : null,
+            h("div", { class: "cd2-trigger-actions" }, [settingsButton()]),
+          ]) : null,
+        ]);
+      }
+
+      function visibleErrors() {
+        return [
+          ["监听", status.value.last_error],
+          ["字幕", status.value.last_subtitle_error],
+          ["Emby 刷新", status.value.last_emby_refresh_error],
+        ].filter(([, value]) => value && !isSortSourceDeletion(value));
+      }
+
+      function renderOverview() {
+        const current = status.value;
+        const last = current.last_trigger || {};
+        const connected = !!current.connected;
+        const pushPrimary = current.push_primary !== false;
+        const fallbackEnabled = statusFallbackEnabled();
+        const errors = visibleErrors();
+        const localPaths = Array.isArray(current.last_delete_local_paths) ? current.last_delete_local_paths : [];
+        return h("div", { class: "cd2-trigger-overview" }, [
+          h("div", { class: "cd2-trigger-card cd2-trigger-card-wide" }, [
+            cardHead("连接与监听", "Push 主触发，轮询按开关提供断线补偿。"),
+            h("div", { class: "cd2-trigger-row" }, [
+              h("span", { class: `cd2-trigger-pill ${connected ? "ok" : "bad"}` }, connected ? "CD2 已连接" : "CD2 未连接"),
+              h("span", { class: `cd2-trigger-pill ${current.running ? "ok" : "bad"}` }, current.running ? "监听运行中" : "监听未运行"),
+              h("span", { class: "cd2-trigger-pill info" }, pushPrimary ? "Push 主触发" : "Push 未启用"),
+              h("span", { class: `cd2-trigger-pill ${fallbackEnabled ? "warn" : "info"}` }, `轮询兜底：${fallbackEnabled ? "已开启" : "默认关闭"}`),
+            ]),
+            h("div", { class: "cd2-trigger-row" }, [
+              h("span", `最近 Push：${displayValue(current.last_push_at)}`),
+              h("span", `最近轮询：${displayValue(current.last_poll_at)}`),
+              h("span", `轮询次数：${displayValue(current.poll_count, "0")}`),
+              h("span", `快速补扫：${displayValue(current.rapid_rescan_count, "0")}`),
+              h("span", `文件变更：${displayValue(current.filesystem_event_count, "0")}`),
+            ]),
+            h("div", { class: "cd2-trigger-note" }, "/Sort 源文件删除属于非监控事件，已忽略。该提示是正常业务说明，不会渲染成错误。"),
+          ]),
+          h("div", { class: "cd2-trigger-card cd2-trigger-card-wide" }, [
+            cardHead("任务、队列与处理统计", "当前状态快照；点击卡片右上角可进入设置。"),
+            h("div", { class: "cd2-trigger-stat-grid" }, [
+              stat("CD2 当前任务", current.upload_count),
+              stat("本轮列表任务", current.task_count),
+              stat("命中规则", current.matched_count),
+              stat("待生成 STRM", current.strm_pending_count ?? current.pending_count),
+              stat("待下载字幕", current.subtitle_pending_count),
+              stat("待处理", current.pending_count),
+              stat("已处理", current.processed_count),
+              stat("已忽略", current.ignored_count),
+            ]),
+          ]),
+          h("div", { class: "cd2-trigger-overview-grid" }, [
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("最近收到的 CD2 事件", "保留原始路径，便于排查目录匹配。"),
+              h("div", { class: "cd2-trigger-row" }, [
+                h("span", `来源：${displayValue(current.last_event_source)}`),
+                h("span", `消息类型：${displayValue(current.last_message_type || current.last_event)}`),
+                h("span", `操作类型：${displayValue(current.last_operator_type)}`),
+                h("span", `状态：${displayValue(current.last_task_status)}`),
+              ]),
+              h("div", { class: "cd2-trigger-path" }, current.last_dest_path || "暂无原始 destPath"),
+              h("div", { class: "cd2-trigger-muted" }, current.last_message_at ? `最近消息：${current.last_message_at}` : "尚未收到上传/文件变更推送"),
+            ]),
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("最近一次生成", "媒体 STRM 批次结果。"),
+              h("div", { class: "cd2-trigger-stat-grid" }, [
+                stat("成功", last.success_count ?? 0),
+                stat("失败", last.fail_count ?? 0),
+                stat("提交", last.total_count ?? last.submitted_count ?? 0),
+              ]),
+              h("div", { class: "cd2-trigger-muted" }, current.last_trigger_at || "暂无记录"),
+              last.message ? h("div", { class: "cd2-trigger-hint" }, displayValue(last.message)) : null,
+            ]),
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("元数据", "由 115 STRM 助手按其配置执行。"),
+              h("div", { class: "cd2-trigger-row" }, [
+                h("span", `助手元数据成功：${displayValue(last.download_success_count ?? current.metadata_success_count, "0")}`),
+                h("span", `失败：${displayValue(last.download_fail_count ?? current.metadata_fail_count, "0")}`),
+              ]),
+              h("div", { class: "cd2-trigger-hint" }, "本插件不把字幕任务传给助手；元数据开关可在生成后动作中调整。"),
+            ]),
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("字幕下载", "独立线程、稳定性确认和间隔限速。"),
+              h("div", { class: "cd2-trigger-row" }, [
+                h("span", `成功：${displayValue(current.subtitle_success_count, "0")}`),
+                h("span", `失败：${displayValue(current.subtitle_fail_count, "0")}`),
+                h("span", `待下载：${displayValue(current.subtitle_pending_count, "0")}`),
+              ]),
+              h("div", { class: "cd2-trigger-path" }, current.last_subtitle_file || "暂无最近字幕文件"),
+              current.last_subtitle_error && !isSortSourceDeletion(current.last_subtitle_error) ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近字幕错误：${current.last_subtitle_error}`) : null,
+            ]),
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("CD2 删除同步", "仅在启用删除同步时处理本地 STRM/字幕。"),
+              h("div", { class: "cd2-trigger-row" }, [
+                h("span", `成功：${displayValue(current.delete_sync_count, "0")}`),
+                h("span", `未找到本地文件：${displayValue(current.delete_sync_missing_count, "0")}`),
+              ]),
+              h("div", { class: "cd2-trigger-path" }, current.last_delete_path ? `最近：${current.last_delete_path}` : "暂无删除记录"),
+              localPaths.length ? h("div", { class: "cd2-trigger-path" }, localPaths.join("\n")) : null,
+            ]),
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("Emby 批次刷新", "媒体、字幕和删除同步共用防抖窗口。"),
+              h("div", { class: "cd2-trigger-row" }, [
+                h("span", `批次：${displayValue(current.emby_refresh_batch_count, "0")}`),
+                h("span", `API 请求：${displayValue(current.emby_refresh_request_count, "0")}`),
+                h("span", `待合并：${displayValue(current.emby_refresh_pending_count, "0")}`),
+              ]),
+              h("div", { class: "cd2-trigger-path" }, `服务器：${Array.isArray(current.last_emby_refresh_servers) ? (current.last_emby_refresh_servers.join(", ") || "暂无") : displayValue(current.last_emby_refresh_servers)}`),
+              h("div", { class: "cd2-trigger-muted" }, current.last_emby_refresh_at || "暂无刷新记录"),
+              current.last_emby_refresh_error && !isSortSourceDeletion(current.last_emby_refresh_error) ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近刷新错误：${current.last_emby_refresh_error}`) : null,
+            ]),
+            h("div", { class: "cd2-trigger-card" }, [
+              cardHead("错误摘要", "/Sort 源文件删除的忽略说明不会计入错误。"),
+              errors.length ? errors.map(([label, value]) => h("div", { class: "cd2-trigger-message cd2-trigger-error", key: label }, `${label}：${value}`)) : h("div", { class: "cd2-trigger-muted" }, "当前没有可见错误。"),
+              h("div", { class: "cd2-trigger-note" }, "/Sort 源文件删除属于非监控事件，已忽略。"),
+            ]),
+          ]),
+        ]);
+      }
+
+      function renderEvents() {
+        const events = sortedEvents();
+        const total = Array.isArray(status.value.event_history) ? status.value.event_history.length : 0;
+        return h("div", { class: "cd2-trigger-stack" }, [
+          h("div", { class: "cd2-trigger-card" }, [
+            cardHead("事件历史", `最近 10 条（当前共 ${total} 条），按时间倒序；点击一条展开详情。`),
+            h("div", { class: "cd2-trigger-row" }, Object.entries(categoryMeta).map(([key, info]) => h("span", { class: `cd2-trigger-category ${info.className}`, key }, info.label))),
+            events.length ? h("div", { class: "cd2-trigger-event-list" }, events.map(({ event }, index) => renderEvent(event, index))) : h("div", { class: "cd2-trigger-event-empty" }, "后端尚未返回事件历史；收到分类事件后，最近 10 条会显示在这里。"),
+            h("div", { class: "cd2-trigger-note" }, "详情包含原始 destPath、规范化 path、来源、操作类型/状态、消息类型、原因和结果；/Sort 源文件删除属于非监控事件，已忽略。"),
+          ]),
+        ]);
       }
 
       onMounted(() => {
@@ -360,91 +750,26 @@ async function createPageModule() {
       });
       onUnmounted(() => { if (timer) clearInterval(timer); });
 
-      return () => {
-        if (showHelp.value) return createUsageView(h, closeHelp, () => emit("close"));
-        const last = status.value.last_trigger || {};
-        const connected = !!status.value.connected;
-        return h("div", { class: "cd2-trigger-page" }, [
-          h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
-          h("div", { class: "cd2-trigger-subtitle" }, "后台监听状态与最近一次 STRM 生成结果"),
-          h("div", { class: "cd2-trigger-card" }, [
-            h("div", { class: "cd2-trigger-row" }, [
-              h("span", { class: `cd2-trigger-pill ${connected ? "ok" : "bad"}` }, connected ? "CD2 已连接" : "CD2 未连接"),
-              h("span", { class: `cd2-trigger-pill ${status.value.running ? "ok" : "bad"}` }, status.value.running ? "监听运行中" : "监听未运行"),
-              h("span", { class: "cd2-trigger-muted" }, status.value.last_poll_at ? `最近轮询：${status.value.last_poll_at}` : "尚未轮询"),
-            ]),
-            h("div", { class: "cd2-trigger-stat-grid" }, [
-              stat("CD2 当前任务", status.value.upload_count),
-              stat("本轮列表任务", status.value.task_count),
-              stat("命中规则", status.value.matched_count),
-              stat("待生成 STRM", status.value.strm_pending_count ?? status.value.pending_count),
-              stat("待下载字幕", status.value.subtitle_pending_count),
-              stat("已处理", status.value.processed_count),
-              stat("轮询次数", status.value.poll_count),
-              stat("快速补扫", status.value.rapid_rescan_count),
-              stat("文件变更事件", status.value.filesystem_event_count),
-            ]),
-          ]),
-          h("div", { class: "cd2-trigger-card" }, [
-            h("strong", "最近收到的 CD2 事件"),
-            h("div", { class: "cd2-trigger-row" }, [
-              h("span", `来源：${status.value.last_event_source || "暂无"}`),
-              h("span", `类型：${status.value.last_message_type || status.value.last_event || "暂无"}`),
-              h("span", `任务类型：${status.value.last_operator_type || "暂无"}`),
-              h("span", `状态：${status.value.last_task_status || "暂无"}`),
-            ]),
-            h("div", { class: "cd2-trigger-path" }, status.value.last_dest_path || "暂无原始 destPath"),
-            h("div", { class: "cd2-trigger-muted" }, status.value.last_message_at ? `最近消息：${status.value.last_message_at}` : "尚未收到上传/文件变更推送"),
-          ]),
-          h("div", { class: "cd2-trigger-card" }, [
-            h("strong", "最近一次生成"),
-            h("div", { class: "cd2-trigger-row" }, [
-              h("span", `成功：${last.success_count ?? 0}`),
-              h("span", `失败：${last.fail_count ?? 0}`),
-              h("span", `助手元数据：${last.download_success_count ?? 0}`),
-              h("span", { class: "cd2-trigger-muted" }, status.value.last_trigger_at || "暂无记录"),
-            ]),
-          ]),
-          h("div", { class: "cd2-trigger-card" }, [
-            h("strong", "本插件 Emby 批次刷新"),
-            h("div", { class: "cd2-trigger-row" }, [
-              h("span", `批次：${status.value.emby_refresh_batch_count ?? 0}`),
-              h("span", `API请求：${status.value.emby_refresh_request_count ?? 0}`),
-              h("span", `待合并：${status.value.emby_refresh_pending_count ?? 0}`),
-              h("span", `服务器：${(status.value.last_emby_refresh_servers || []).join(", ") || "暂无"}`),
-              h("span", { class: "cd2-trigger-muted" }, status.value.last_emby_refresh_at || "暂无记录"),
-            ]),
-            status.value.last_emby_refresh_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近刷新错误：${status.value.last_emby_refresh_error}`) : null,
-          ]),
-          h("div", { class: "cd2-trigger-card" }, [
-            h("strong", "CD2 删除同步"),
-            h("div", { class: "cd2-trigger-row" }, [
-              h("span", `成功：${status.value.delete_sync_count ?? 0}`),
-              h("span", `未找到本地文件：${status.value.delete_sync_missing_count ?? 0}`),
-              h("span", { class: "cd2-trigger-muted" }, status.value.last_delete_path ? `最近：${status.value.last_delete_path}` : "暂无记录"),
-            ]),
-            status.value.last_delete_local_paths?.length ? h("div", { class: "cd2-trigger-path" }, status.value.last_delete_local_paths.join("\n")) : null,
-          ]),
-          h("div", { class: "cd2-trigger-card" }, [
-            h("strong", "字幕下载"),
-            h("div", { class: "cd2-trigger-row" }, [
-              h("span", `成功：${status.value.subtitle_success_count ?? 0}`),
-              h("span", `失败：${status.value.subtitle_fail_count ?? 0}`),
-              h("span", { class: "cd2-trigger-muted" }, status.value.last_subtitle_file ? `最近：${status.value.last_subtitle_file}` : "暂无记录"),
-            ]),
-          ]),
-          status.value.last_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, status.value.last_error) : null,
-          status.value.last_subtitle_error ? h("div", { class: "cd2-trigger-message cd2-trigger-error" }, `最近字幕错误：${status.value.last_subtitle_error}`) : null,
-          message.value ? h("div", { class: "cd2-trigger-message" }, message.value) : null,
-          h("div", { class: "cd2-trigger-actions" }, [
-            h("button", { class: "cd2-trigger-btn", disabled: loading.value, onClick: loadStatus }, loading.value ? "刷新中…" : "刷新状态"),
-            h("button", { class: "cd2-trigger-btn primary", disabled: triggering.value, onClick: trigger }, triggering.value ? "触发中…" : "立即检查上传"),
-            h("button", { class: "cd2-trigger-btn", onClick: () => { showHelp.value = true; } }, "使用说明"),
-            h("button", { class: "cd2-trigger-btn", onClick: () => emit("switch") }, "设置"),
-            h("button", { class: "cd2-trigger-btn", onClick: () => emit("close") }, "关闭"),
-          ]),
-        ]);
-      };
+      return () => h("div", { class: "cd2-trigger-page" }, [
+        h("div", { class: "cd2-trigger-title" }, "CD2 上传触发 115 STRM"),
+        h("div", { class: "cd2-trigger-subtitle" }, "v0.8.0 · 紧凑总览、最近 10 条分类事件和可展开详情"),
+        h("div", { class: "cd2-trigger-tabs", role: "tablist" }, [
+          button("总览", () => { activeTab.value = "overview"; }, `cd2-trigger-tab${activeTab.value === "overview" ? " active" : ""}`),
+          button("事件", () => { activeTab.value = "events"; }, `cd2-trigger-tab${activeTab.value === "events" ? " active" : ""}`),
+          button("说明", () => { activeTab.value = "usage"; }, `cd2-trigger-tab${activeTab.value === "usage" ? " active" : ""}`),
+        ]),
+        activeTab.value === "events" ? renderEvents() : activeTab.value === "usage"
+          ? createUsageView(h, () => { activeTab.value = "overview"; }, () => emit("close"), () => emit("switch"))
+          : renderOverview(),
+        message.value ? h("div", { class: "cd2-trigger-message" }, message.value) : null,
+        h("div", { class: "cd2-trigger-actions cd2-trigger-footer" }, [
+          button(loading.value ? "刷新中…" : "刷新状态", loadStatus, "", { disabled: loading.value }),
+          button(triggering.value ? "触发中…" : "立即检查上传", trigger, "primary", { disabled: triggering.value }),
+          button("使用说明", () => { activeTab.value = "usage"; }),
+          button("设置", () => emit("switch")),
+          button("关闭", () => emit("close")),
+        ]),
+      ]);
     },
   });
   return () => Page;
